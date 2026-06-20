@@ -10,11 +10,14 @@ import argparse
 import sys
 from pathlib import Path
 
+from .commits import create_commit, log
 from .fsck import fsck
 from .index import Index, IndexEntry
 from .objects import KINDS, ObjectStore, hash_file
+from .refs import head_ref, read_head, update_ref
 from .repo import find_wit, init
 from .status import compute_status
+from .trees import build_tree
 from .worktree import rel_path, walk_files
 
 
@@ -97,6 +100,37 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_commit(args: argparse.Namespace) -> int:
+    wit = find_wit()
+    store = ObjectStore(wit)
+    with Index(wit) as index:
+        entries = index.entries()
+    if not entries:
+        print("niets om te committen (index is leeg)", file=sys.stderr)
+        return 1
+    tree = build_tree(entries, store)
+    parents = [head] if (head := read_head(wit)) else []
+    commit_id = create_commit(store, tree, parents, args.message)
+    update_ref(wit, head_ref(wit), commit_id)
+    print(f"[{head_ref(wit)} {commit_id[3:11]}] {args.message}")
+    return 0
+
+
+def cmd_log(args: argparse.Namespace) -> int:
+    wit = find_wit()
+    history = log(ObjectStore(wit), read_head(wit))
+    if not history:
+        print("nog geen commits")
+        return 0
+    for commit_id, commit in history:
+        print(f"commit {commit_id}")
+        if len(commit["parents"]) > 1:
+            print("Merge: " + " ".join(p[3:11] for p in commit["parents"]))
+        print(f"Datum:  {commit['time']}   Host: {commit['host']}")
+        print(f"\n    {commit['message']}\n")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="wit")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -114,6 +148,13 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("status", help="toon werkdir t.o.v. de index")
     p.set_defaults(func=cmd_status)
+
+    p = sub.add_parser("commit", help="leg de staged toestand vast als commit")
+    p.add_argument("-m", "--message", required=True)
+    p.set_defaults(func=cmd_commit)
+
+    p = sub.add_parser("log", help="toon de commit-historie (DAG)")
+    p.set_defaults(func=cmd_log)
 
     p = sub.add_parser("hash-object", help="hash (en met -w: bewaar) een bestand")
     p.add_argument("file")
