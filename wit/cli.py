@@ -11,8 +11,11 @@ import sys
 from pathlib import Path
 
 from .fsck import fsck
+from .index import Index, IndexEntry
 from .objects import KINDS, ObjectStore, hash_file
 from .repo import find_wit, init
+from .status import compute_status
+from .worktree import rel_path, walk_files
 
 
 def _store() -> ObjectStore:
@@ -51,6 +54,49 @@ def cmd_cat_object(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_add(args: argparse.Namespace) -> int:
+    wit = find_wit()
+    root = wit.parent
+    store = ObjectStore(wit)
+    added = 0
+    with Index(wit) as index:
+        for raw in args.paths:
+            for path in walk_files(Path(raw).resolve()):
+                rel = rel_path(path, root)
+                oid = store.put_file(path, kind="blobs")
+                st = path.stat()
+                index.put_entry(IndexEntry(
+                    path=rel, hash=oid, mode=st.st_mode, size=st.st_size,
+                    mtime_ns=st.st_mtime_ns, ctime_ns=st.st_ctime_ns,
+                    device=st.st_dev, inode=st.st_ino, staged=1,
+                ))
+                added += 1
+    print(f"{added} bestand(en) toegevoegd")
+    return 0
+
+
+def cmd_status(args: argparse.Namespace) -> int:
+    wit = find_wit()
+    with Index(wit) as index:
+        status = compute_status(index, wit.parent)
+    groups = (
+        ("Gewijzigd (niet opnieuw toegevoegd)", status.modified),
+        ("Toegevoegd (staged)", status.staged),
+        ("Verwijderd", status.deleted),
+        ("Niet gevolgd", status.untracked),
+    )
+    if status.clean and not status.staged:
+        print("werkdirectory schoon, niets toegevoegd")
+        return 0
+    for title, paths in groups:
+        if not paths:
+            continue
+        print(f"{title}:")
+        for rel in paths:
+            print(f"    {rel}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="wit")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -61,6 +107,13 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("fsck", help="verifieer de object store")
     p.set_defaults(func=cmd_fsck)
+
+    p = sub.add_parser("add", help="neem bestanden onder beheer")
+    p.add_argument("paths", nargs="+")
+    p.set_defaults(func=cmd_add)
+
+    p = sub.add_parser("status", help="toon werkdir t.o.v. de index")
+    p.set_defaults(func=cmd_status)
 
     p = sub.add_parser("hash-object", help="hash (en met -w: bewaar) een bestand")
     p.add_argument("file")
