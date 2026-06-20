@@ -181,6 +181,13 @@ def cmd_pull(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_serve(args: argparse.Namespace) -> int:
+    from .web import serve
+
+    serve(find_wit(), host=args.host, port=args.port)
+    return 0
+
+
 def cmd_gc(args: argparse.Namespace) -> int:
     wit = find_wit()
     report = gc(wit, ObjectStore(wit), grace_seconds=args.grace)
@@ -237,6 +244,11 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("log", help="toon de commit-historie (DAG)")
     p.set_defaults(func=cmd_log)
+
+    p = sub.add_parser("serve", help="start de read-only webinterface")
+    p.add_argument("--host", default="127.0.0.1")
+    p.add_argument("--port", type=int, default=8000)
+    p.set_defaults(func=cmd_serve)
 
     p = sub.add_parser("gc", help="ruim onbereikbare objecten op (mark/grace/sweep)")
     p.add_argument(
