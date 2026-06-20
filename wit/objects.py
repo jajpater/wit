@@ -81,6 +81,13 @@ class ObjectStore:
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(src, dest)
 
+    def recompute_id(self, kind: str, oid: str) -> str:
+        """Herbereken de id van een opgeslagen object door het te streamen (voor fsck)."""
+        path = self._path(kind, oid)
+        if not path.exists():
+            raise KeyError(oid)
+        return hash_file(path)
+
     def put(self, kind: str, data: bytes) -> str:
         """Bewaar bytes; geeft de object-id terug. Idempotent (dedup op hash)."""
         oid = hash_bytes(data)

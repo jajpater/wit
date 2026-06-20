@@ -12,6 +12,7 @@ from collections.abc import Iterable, Iterator
 from pathlib import Path
 
 from .commits import create_commit, read_commit
+from .ignore import load_ignore
 from .index import Index, IndexEntry
 from .objects import ObjectStore
 from .refs import head_ref, read_head, update_ref
@@ -28,12 +29,17 @@ def _entry_for(rel: str, oid: str, st: os.stat_result) -> IndexEntry:
 
 
 def add(wit: Path, store: ObjectStore, targets: Iterable[str]) -> int:
-    """Neem bestanden onder beheer: blob opslaan + index-entry schrijven."""
+    """Neem bestanden onder beheer: blob opslaan + index-entry schrijven.
+
+    Bij het aflopen van een map worden `.witignore`-patronen toegepast; een expliciet
+    genoemd bestand wordt altijd toegevoegd (vergelijk ``git add -f``).
+    """
     root = wit.parent
+    ignore = load_ignore(root)
     count = 0
     with Index(wit) as index:
         for raw in targets:
-            for path in walk_files(Path(raw).resolve()):
+            for path in walk_files(Path(raw).resolve(), root=root, ignore=ignore):
                 rel = rel_path(path, root)
                 oid = store.put_file(path, kind="blobs")
                 index.put_entry(_entry_for(rel, oid, path.stat()))

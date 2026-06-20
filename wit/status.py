@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .ignore import load_ignore
 from .index import Index, IndexEntry
 from .objects import hash_file
 from .worktree import rel_path, walk_files
@@ -43,6 +44,7 @@ def compute_status(
 ) -> Status:
     root = Path(root)
     entries = {e.path: e for e in index.entries()}
+    ignore = load_ignore(root)
     seen: set[str] = set()
     status = Status()
 
@@ -51,7 +53,9 @@ def compute_status(
         seen.add(rel)
         entry = entries.get(rel)
         if entry is None:
-            status.untracked.append(rel)
+            # ignore geldt alleen voor niet-gevolgde bestanden (git-semantiek)
+            if not ignore.match(rel, False):
+                status.untracked.append(rel)
             continue
         unchanged = _stat_matches(entry, path.stat()) or hash_file(path) == entry.hash
         if not unchanged:

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .objects import KINDS, ObjectStore, hash_bytes
+from .objects import KINDS, ObjectStore
 
 
 @dataclass
@@ -27,9 +27,8 @@ def fsck(store: ObjectStore, clean_tmp: bool = True) -> FsckReport:
     report = FsckReport()
     for kind in KINDS:
         for oid in store.iter_objects(kind):
-            data = store.get(kind, oid)
             report.checked += 1
-            if hash_bytes(data) != oid:
+            if store.recompute_id(kind, oid) != oid:  # streamend, geen geheugenpiek
                 report.corrupt.append(oid)
     if store.tmp_dir.exists():
         for stray in store.tmp_dir.iterdir():
