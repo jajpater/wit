@@ -16,6 +16,7 @@ from .ignore import load_ignore
 from .index import Index, IndexEntry
 from .objects import ObjectStore
 from .refs import head_ref, read_head, update_ref
+from .repo import read_sparse, sparse_includes
 from .trees import build_tree, read_tree
 from .worktree import rel_path, walk_files
 
@@ -105,17 +106,32 @@ def tree_map(store: ObjectStore, tree_oid: str) -> dict[str, str]:
 def checkout(wit: Path, store: ObjectStore, commit_id: str) -> int:
     """Materialiseer de tree van ``commit_id`` als echte bestanden in de werkdir.
 
-    Volledige kopie (geen symlinks); modebits worden hersteld. Na afloop wordt de
-    index herbouwd zodat ``status`` schoon is.
+    Volledige kopie (geen symlinks); modebits worden hersteld. Respecteert de sparse-cone
+    (`.wit/sparse`): alleen paden in de cone worden uitgecheckt, en eerder uitgecheckte
+    bestanden die nu buiten de cone vallen worden verwijderd. Na afloop wordt de index
+    herbouwd zodat ``status`` schoon is.
     """
     root = wit.parent
+    sparse = read_sparse(wit)
+    with Index(wit) as index:
+        old_paths = {e.path for e in index.entries()}
+
     tree = read_commit(store, commit_id)["tree"]
     materialized: list[tuple[str, dict]] = []
     for rel, entry in iter_tree(store, tree):
+        if not sparse_includes(sparse, rel):
+            continue
         target = root / rel
         store.copy_to("blobs", entry["hash"], target)
         os.chmod(target, entry["mode"] & 0o7777)
         materialized.append((rel, entry))
+
+    # cone versmald -> eerder uitgecheckte, nu uitgesloten bestanden opruimen
+    new_paths = {rel for rel, _ in materialized}
+    for path in old_paths - new_paths:
+        target = root / path
+        if target.exists():
+            target.unlink()
 
     with Index(wit) as index:
         index.clear()

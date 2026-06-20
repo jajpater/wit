@@ -57,3 +57,26 @@ def set_remote(wit: Path, remote_path: str) -> None:
     cfg = read_config(wit)
     cfg["remote"] = str(remote_path)
     _write_config(wit, cfg)
+
+
+def read_sparse(wit: Path) -> list[str]:
+    """De sparse-cone (padprefixen); leeg = volledige checkout."""
+    path = Path(wit) / "sparse"
+    if not path.exists():
+        return []
+    return [line.strip() for line in path.read_text().splitlines() if line.strip()]
+
+
+def set_sparse(wit: Path, patterns: list[str]) -> None:
+    (Path(wit) / "sparse").write_text("\n".join(patterns) + "\n" if patterns else "")
+
+
+def sparse_includes(patterns: list[str], rel: str) -> bool:
+    """Zit ``rel`` in de cone? (Lege cone = alles inbegrepen.)"""
+    if not patterns:
+        return True
+    for pat in patterns:
+        prefix = pat.rstrip("/")
+        if rel == prefix or rel.startswith(prefix + "/"):
+            return True
+    return False

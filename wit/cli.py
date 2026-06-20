@@ -18,7 +18,7 @@ from .index import Index
 from .objects import KINDS, ObjectStore, hash_file
 from .refs import head_ref, read_head
 from .remote import make_remote
-from .repo import find_wit, init, read_config, set_remote
+from .repo import find_wit, init, read_config, read_sparse, set_remote, set_sparse
 from .status import compute_status
 
 
@@ -181,6 +181,22 @@ def cmd_pull(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_sparse(args: argparse.Namespace) -> int:
+    wit = find_wit()
+    if args.action == "list":
+        patterns = read_sparse(wit)
+        print("\n".join(patterns) if patterns else "(geen sparse; volledige checkout)")
+        return 0
+    set_sparse(wit, args.patterns)
+    head = read_head(wit)
+    if head is not None:
+        count = porcelain.checkout(wit, ObjectStore(wit), head)
+        print(f"sparse-cone toegepast: {count} bestand(en) uitgecheckt")
+    else:
+        print("sparse-cone ingesteld")
+    return 0
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     from .web import serve
 
@@ -260,6 +276,11 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("checkout", help="materialiseer een commit in de werkdir")
     p.add_argument("commit", nargs="?", help="commit-id (standaard: HEAD)")
     p.set_defaults(func=cmd_checkout)
+
+    p = sub.add_parser("sparse", help="beheer de gedeeltelijke (sparse) checkout")
+    p.add_argument("action", choices=("set", "list"))
+    p.add_argument("patterns", nargs="*", help="padprefixen voor de cone")
+    p.set_defaults(func=cmd_sparse)
 
     p = sub.add_parser("clone", help="kloon een remote naar een nieuwe map")
     p.add_argument("remote")
