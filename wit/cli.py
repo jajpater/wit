@@ -10,15 +10,14 @@ import argparse
 import sys
 from pathlib import Path
 
-from .commits import create_commit, log
+from . import porcelain
+from .commits import log, read_commit
 from .fsck import fsck
-from .index import Index, IndexEntry
+from .index import Index
 from .objects import KINDS, ObjectStore, hash_file
-from .refs import head_ref, read_head, update_ref
+from .refs import head_ref, read_head
 from .repo import find_wit, init
 from .status import compute_status
-from .trees import build_tree
-from .worktree import rel_path, walk_files
 
 
 def _store() -> ObjectStore:
@@ -59,29 +58,21 @@ def cmd_cat_object(args: argparse.Namespace) -> int:
 
 def cmd_add(args: argparse.Namespace) -> int:
     wit = find_wit()
-    root = wit.parent
-    store = ObjectStore(wit)
-    added = 0
-    with Index(wit) as index:
-        for raw in args.paths:
-            for path in walk_files(Path(raw).resolve()):
-                rel = rel_path(path, root)
-                oid = store.put_file(path, kind="blobs")
-                st = path.stat()
-                index.put_entry(IndexEntry(
-                    path=rel, hash=oid, mode=st.st_mode, size=st.st_size,
-                    mtime_ns=st.st_mtime_ns, ctime_ns=st.st_ctime_ns,
-                    device=st.st_dev, inode=st.st_ino, staged=1,
-                ))
-                added += 1
+    added = porcelain.add(wit, ObjectStore(wit), args.paths)
     print(f"{added} bestand(en) toegevoegd")
     return 0
 
 
 def cmd_status(args: argparse.Namespace) -> int:
     wit = find_wit()
+    store = ObjectStore(wit)
+    head = read_head(wit)
+    head_tree = (
+        porcelain.tree_map(store, read_commit(store, head)["tree"])
+        if head else None
+    )
     with Index(wit) as index:
-        status = compute_status(index, wit.parent)
+        status = compute_status(index, wit.parent, head_tree)
     groups = (
         ("Gewijzigd (niet opnieuw toegevoegd)", status.modified),
         ("Toegevoegd (staged)", status.staged),
@@ -102,17 +93,24 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 def cmd_commit(args: argparse.Namespace) -> int:
     wit = find_wit()
-    store = ObjectStore(wit)
-    with Index(wit) as index:
-        entries = index.entries()
-    if not entries:
-        print("niets om te committen (index is leeg)", file=sys.stderr)
+    try:
+        commit_id = porcelain.commit(wit, ObjectStore(wit), args.message)
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
         return 1
-    tree = build_tree(entries, store)
-    parents = [head] if (head := read_head(wit)) else []
-    commit_id = create_commit(store, tree, parents, args.message)
-    update_ref(wit, head_ref(wit), commit_id)
     print(f"[{head_ref(wit)} {commit_id[3:11]}] {args.message}")
+    return 0
+
+
+def cmd_checkout(args: argparse.Namespace) -> int:
+    wit = find_wit()
+    store = ObjectStore(wit)
+    commit_id = args.commit or read_head(wit)
+    if commit_id is None:
+        print("niets om uit te checken (nog geen commits)", file=sys.stderr)
+        return 1
+    count = porcelain.checkout(wit, store, commit_id)
+    print(f"{count} bestand(en) uitgecheckt")
     return 0
 
 
@@ -155,6 +153,10 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("log", help="toon de commit-historie (DAG)")
     p.set_defaults(func=cmd_log)
+
+    p = sub.add_parser("checkout", help="materialiseer een commit in de werkdir")
+    p.add_argument("commit", nargs="?", help="commit-id (standaard: HEAD)")
+    p.set_defaults(func=cmd_checkout)
 
     p = sub.add_parser("hash-object", help="hash (en met -w: bewaar) een bestand")
     p.add_argument("file")

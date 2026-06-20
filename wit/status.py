@@ -1,9 +1,10 @@
-"""`status`: vergelijk de werkdirectory met de index.
+"""`status`: vergelijk de werkdirectory met de index (en met HEAD).
 
-In M1 is er nog geen commit-historie (dat is M2), dus alles in de index geldt als
-'toegevoegd/staged'. Verander-detectie volgt git's snelle pad: matcht ``(size, mtime,
-device, inode)`` met de index-entry, dan nemen we de inhoud ongewijzigd aan; anders
-herhashen we om een echte wijziging van een loutere aanraking te onderscheiden.
+Verander-detectie volgt git's snelle pad: matcht ``(size, mtime, device, inode)`` met de
+index-entry, dan nemen we de inhoud ongewijzigd aan; anders herhashen we om een echte
+wijziging van een loutere aanraking te onderscheiden. Is er een HEAD-tree meegegeven, dan
+geldt een ongewijzigd, gevolgd bestand als *schoon* wanneer zijn hash gelijk is aan HEAD,
+en anders als *staged*; zonder HEAD (nog geen commits) is alles in de index 'staged'.
 """
 
 from __future__ import annotations
@@ -37,7 +38,9 @@ def _stat_matches(entry: IndexEntry, st) -> bool:
     )
 
 
-def compute_status(index: Index, root: Path) -> Status:
+def compute_status(
+    index: Index, root: Path, head_tree: dict[str, str] | None = None
+) -> Status:
     root = Path(root)
     entries = {e.path: e for e in index.entries()}
     seen: set[str] = set()
@@ -49,12 +52,14 @@ def compute_status(index: Index, root: Path) -> Status:
         entry = entries.get(rel)
         if entry is None:
             status.untracked.append(rel)
-        elif _stat_matches(entry, path.stat()):
-            status.staged.append(rel)
-        elif hash_file(path) == entry.hash:
-            status.staged.append(rel)  # alleen stat veranderde, inhoud gelijk
-        else:
+            continue
+        unchanged = _stat_matches(entry, path.stat()) or hash_file(path) == entry.hash
+        if not unchanged:
             status.modified.append(rel)
+        elif head_tree is not None and head_tree.get(rel) == entry.hash:
+            pass  # gevolgd, ongewijzigd én gelijk aan HEAD -> schoon
+        else:
+            status.staged.append(rel)
 
     for rel in entries:
         if rel not in seen:

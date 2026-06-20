@@ -12,6 +12,7 @@ nooit een half object op zijn definitieve plek achterlaat (zie M0-criterium in D
 from __future__ import annotations
 
 import os
+import shutil
 import tempfile
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -70,6 +71,15 @@ class ObjectStore:
         if not path.exists():
             raise KeyError(oid)
         return path.read_bytes()
+
+    def copy_to(self, kind: str, oid: str, dest: Path) -> None:
+        """Materialiseer een object als echt bestand op ``dest`` (streamend, geen symlink)."""
+        src = self._path(kind, oid)
+        if not src.exists():
+            raise KeyError(oid)
+        dest = Path(dest)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, dest)
 
     def put(self, kind: str, data: bytes) -> str:
         """Bewaar bytes; geeft de object-id terug. Idempotent (dedup op hash)."""

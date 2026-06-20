@@ -76,6 +76,9 @@ class Index:
     def remove(self, path: str) -> None:
         self.conn.execute("DELETE FROM entries WHERE path = ?", (path,))
 
+    def clear(self) -> None:
+        self.conn.execute("DELETE FROM entries")
+
     def entries(self) -> list[IndexEntry]:
         cur = self.conn.execute("SELECT * FROM entries ORDER BY path")
         return [IndexEntry(**dict(row)) for row in cur]
