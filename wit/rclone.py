@@ -14,9 +14,11 @@ import os
 import shutil
 import subprocess
 import tempfile
+from collections import defaultdict
+from collections.abc import Iterable
 
 from .objects import ObjectStore
-from .remote import Remote
+from .remote import META_KINDS, Remote
 
 
 class RcloneError(Exception):
@@ -69,6 +71,70 @@ class DumbRcloneRemote(Remote):
         finally:
             if os.path.exists(tmp):
                 os.unlink(tmp)
+
+    # -- RefStore (best-effort CAS) --
+    def list_objects(self, kind: str) -> Iterable[str]:
+        result = self._run(
+            ["lsf", "-R", "--files-only", self._path("objects", kind) + "/"]
+        )
+        if result.returncode != 0:
+            return []
+        out = []
+        for line in result.stdout.decode().splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            ab, _, rest = line.partition("/")
+            out.append(f"b3:{ab}{rest}")
+        return out
+
+    # -- Bulk-transport (M7): één rclone-call per objecttype i.p.v. per object --
+    def _bulk_copy(self, src: str, dst: str, rels: list[str]) -> None:
+        if not rels:
+            return
+        fd, listfile = tempfile.mkstemp()
+        try:
+            with os.fdopen(fd, "w") as f:
+                f.write("\n".join(rels) + "\n")
+            # rclone copy is idempotent: bestaande objecten worden overgeslagen,
+            # dus geen per-object has()-round-trips nodig.
+            result = self._run(["copy", "--files-from", listfile, src, dst])
+            if result.returncode != 0:
+                raise RcloneError(result.stderr.decode())
+        finally:
+            os.unlink(listfile)
+
+    def _group(self, items: Iterable[tuple[str, str]]) -> dict[str, list[str]]:
+        by_kind: dict[str, list[str]] = defaultdict(list)
+        for kind, oid in items:
+            h = oid.split(":", 1)[1]
+            by_kind[kind].append(f"{h[:2]}/{h[2:]}")
+        return by_kind
+
+    def upload_objects(
+        self, store: ObjectStore, items: Iterable[tuple[str, str]]
+    ) -> None:
+        for kind, rels in self._group(items).items():
+            self._bulk_copy(
+                str(store.objects_dir / kind), self._path("objects", kind), rels
+            )
+
+    def download_objects(
+        self, store: ObjectStore, items: Iterable[tuple[str, str]]
+    ) -> None:
+        for kind, rels in self._group(items).items():
+            (store.objects_dir / kind).mkdir(parents=True, exist_ok=True)
+            self._bulk_copy(
+                self._path("objects", kind), str(store.objects_dir / kind), rels
+            )
+
+    def fetch_metadata(self, store: ObjectStore) -> None:
+        for kind in META_KINDS:
+            dest = store.objects_dir / kind
+            dest.mkdir(parents=True, exist_ok=True)
+            result = self._run(["copy", self._path("objects", kind), str(dest)])
+            if result.returncode != 0:
+                raise RcloneError(result.stderr.decode())
 
     # -- RefStore (best-effort CAS) --
     def read_ref(self, ref: str) -> str | None:

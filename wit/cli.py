@@ -13,6 +13,7 @@ from pathlib import Path
 from . import porcelain, sync
 from .commits import log, read_commit
 from .fsck import fsck
+from .gc import DEFAULT_GRACE_SECONDS, gc
 from .index import Index
 from .objects import KINDS, ObjectStore, hash_file
 from .refs import head_ref, read_head
@@ -173,6 +174,16 @@ def cmd_pull(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_gc(args: argparse.Namespace) -> int:
+    wit = find_wit()
+    report = gc(wit, ObjectStore(wit), grace_seconds=args.grace)
+    print(
+        f"{report.removed} verwijderd, {report.kept} behouden"
+        + (f", {report.skipped_young} binnen grace-venster" if report.skipped_young else "")
+    )
+    return 0
+
+
 def cmd_log(args: argparse.Namespace) -> int:
     wit = find_wit()
     history = log(ObjectStore(wit), read_head(wit))
@@ -212,6 +223,13 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("log", help="toon de commit-historie (DAG)")
     p.set_defaults(func=cmd_log)
+
+    p = sub.add_parser("gc", help="ruim onbereikbare objecten op (mark/grace/sweep)")
+    p.add_argument(
+        "--grace", type=float, default=DEFAULT_GRACE_SECONDS,
+        help="grace-venster in seconden (standaard ~2 weken)",
+    )
+    p.set_defaults(func=cmd_gc)
 
     p = sub.add_parser("checkout", help="materialiseer een commit in de werkdir")
     p.add_argument("commit", nargs="?", help="commit-id (standaard: HEAD)")

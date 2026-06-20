@@ -16,11 +16,15 @@ import fcntl
 import os
 import tempfile
 from abc import ABC, abstractmethod
+from collections.abc import Iterable
 from pathlib import Path
 
 from .objects import ObjectStore
 
 MAIN_REF = "refs/heads/main"
+
+# De kleine, metadata-objecttypes die bij fetch wholesale opgehaald worden (DOEL.md).
+META_KINDS = ("commits", "trees")
 
 
 class ObjectTransport(ABC):
@@ -34,6 +38,34 @@ class ObjectTransport(ABC):
     @abstractmethod
     def download(self, store: ObjectStore, kind: str, oid: str) -> None:
         """Kopieer een remote object naar de lokale store."""
+
+    @abstractmethod
+    def list_objects(self, kind: str) -> Iterable[str]:
+        """Alle object-id's van een type op de remote."""
+
+    # -- Bulk-transport (M7). Default: per-object lussen (prima voor een lokaal
+    # filesystem). rclone overschrijft dit met één call voor alles, zodat de
+    # per-object-latency van cloud-backends niet de bottleneck wordt. --
+    def upload_objects(
+        self, store: ObjectStore, items: Iterable[tuple[str, str]]
+    ) -> None:
+        for kind, oid in items:
+            if not self.has(kind, oid):
+                self.upload(store, kind, oid)
+
+    def download_objects(
+        self, store: ObjectStore, items: Iterable[tuple[str, str]]
+    ) -> None:
+        for kind, oid in items:
+            if not store.has(kind, oid):
+                self.download(store, kind, oid)
+
+    def fetch_metadata(self, store: ObjectStore) -> None:
+        """Haal alle commit- en tree-objecten op (klein; wholesale)."""
+        for kind in META_KINDS:
+            for oid in self.list_objects(kind):
+                if not store.has(kind, oid):
+                    self.download(store, kind, oid)
 
 
 class RefStore(ABC):
@@ -67,6 +99,9 @@ class FilesystemRemote(Remote):
 
     def download(self, store: ObjectStore, kind: str, oid: str) -> None:
         store.ingest(kind, oid, self.store.path_for(kind, oid))
+
+    def list_objects(self, kind: str) -> Iterable[str]:
+        return self.store.iter_objects(kind)
 
     # -- RefStore (best-effort CAS) --
     def read_ref(self, ref: str) -> str | None:

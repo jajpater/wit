@@ -45,6 +45,28 @@ def test_push_and_clone_via_rclone_byte_identical(tmp_path):
         assert (dest / rel).read_bytes() == data, rel
 
 
+def test_rclone_push_uses_constant_calls(tmp_path):
+    # M7: het aantal rclone-aanroepen mag niet meegroeien met het aantal bestanden.
+    src = tmp_path / "src"
+    src.mkdir()
+    files = {f"f{i:03d}.txt": f"inhoud {i}".encode() for i in range(40)}
+    wit, store = _commit(src, files)
+
+    remote = DumbRcloneRemote(str(tmp_path / "remote"))
+    calls = {"n": 0}
+    inner = remote._run
+
+    def counting(args, **kw):
+        calls["n"] += 1
+        return inner(args, **kw)
+
+    remote._run = counting  # type: ignore[method-assign]
+    sync.push(wit, store, remote)
+
+    # ~ read_ref(1) + bulk copy per kind(blobs/trees/commits = 3) + CAS(cat+rcat = 2)
+    assert calls["n"] <= 10, f"te veel rclone-calls voor 40 bestanden: {calls['n']}"
+
+
 def test_rclone_ref_cas_is_best_effort(tmp_path):
     remote = DumbRcloneRemote(str(tmp_path / "remote"))
     assert remote.read_ref("refs/heads/main") is None

@@ -74,9 +74,8 @@ def push(wit: Path, store: ObjectStore, remote: Remote) -> str:
             raise ValueError("non-fast-forward: eerst pull (reconcile is M6)")
 
     have = _ancestors(store, remote_head)
-    for kind, oid in _reachable_objects(store, local_head, have):
-        if not remote.has(kind, oid):
-            remote.upload(store, kind, oid)
+    items = list(_reachable_objects(store, local_head, have))
+    remote.upload_objects(store, items)  # M7: bulk i.p.v. per object
 
     # ref-CAS als laatste stap — de waarheidstransactie
     if not remote.compare_and_swap_ref(MAIN_REF, remote_head, local_head):
@@ -84,33 +83,23 @@ def push(wit: Path, store: ObjectStore, remote: Remote) -> str:
     return local_head
 
 
-def _fetch_tree(store: ObjectStore, remote: Remote, tree_oid: str) -> None:
-    if not store.has("trees", tree_oid):
-        remote.download(store, "trees", tree_oid)
-    for entry in read_tree(store, tree_oid).values():
-        if entry["type"] == "tree":
-            _fetch_tree(store, remote, entry["hash"])
-        elif not store.has("blobs", entry["hash"]):
-            remote.download(store, "blobs", entry["hash"])
-
-
 def fetch(store: ObjectStore, remote: Remote) -> str | None:
-    """Download alle objecten bereikbaar vanaf de remote main; raak refs niet aan."""
+    """Download alle objecten bereikbaar vanaf de remote main; raak refs niet aan.
+
+    Strategie (DOEL.md): haal eerst alle metadata (commits+trees) wholesale, bepaal
+    dan lokaal welke blobs ontbreken, en haal die in bulk. Zo is het aantal
+    transport-operaties constant i.p.v. evenredig met het aantal objecten.
+    """
     remote_head = remote.read_ref(MAIN_REF)
     if remote_head is None:
         return None
-    seen: set[str] = set()
-    stack = [remote_head]
-    while stack:
-        cid = stack.pop()
-        if cid in seen:
-            continue
-        seen.add(cid)
-        if not store.has("commits", cid):
-            remote.download(store, "commits", cid)
-        commit = read_commit(store, cid)
-        _fetch_tree(store, remote, commit["tree"])
-        stack.extend(commit["parents"])
+    remote.fetch_metadata(store)  # alle commits + trees lokaal
+    blobs = [
+        (kind, oid)
+        for kind, oid in _reachable_objects(store, remote_head, set())
+        if kind == "blobs" and not store.has("blobs", oid)
+    ]
+    remote.download_objects(store, blobs)  # M7: bulk
     return remote_head
 
 
