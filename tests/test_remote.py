@@ -69,8 +69,11 @@ def test_pull_fast_forward(tmp_path):
     sync.push(wit, store, remote)
 
     # clone pullt -> krijgt de nieuwe commit en het nieuwe bestand
-    pulled = sync.pull(cwit, ObjectStore(cwit), FilesystemRemote(tmp_path / "remote"))
+    pulled, conflicts = sync.pull(
+        cwit, ObjectStore(cwit), FilesystemRemote(tmp_path / "remote")
+    )
     assert pulled == head2
+    assert conflicts == []
     assert read_head(cwit) == head2
     assert (clone_dir / "b.txt").read_bytes() == b"nieuw bestand"
 

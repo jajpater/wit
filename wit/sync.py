@@ -11,6 +11,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from .commits import read_commit
+from .merge import reconcile
 from .objects import ObjectStore
 from .porcelain import checkout
 from .refs import head_ref, read_head, update_ref
@@ -113,18 +114,25 @@ def fetch(store: ObjectStore, remote: Remote) -> str | None:
     return remote_head
 
 
-def pull(wit: Path, store: ObjectStore, remote: Remote) -> str | None:
+def pull(wit: Path, store: ObjectStore, remote: Remote) -> tuple[str, list[str]] | None:
+    """Haal de remote op; fast-forward of, bij divergentie, reconcile tot een merge.
+
+    Geeft (head, conflict-paden) terug, of None als de remote leeg is.
+    """
     head = fetch(store, remote)
     if head is None:
         return None
     local = read_head(wit)
     if local == head:
-        return head  # up-to-date
-    if local is not None and not _is_ancestor(store, local, head):
-        raise ValueError("divergente historie: reconcile is M6")
-    update_ref(wit, head_ref(wit), head)
-    checkout(wit, store, head)
-    return head
+        return head, []  # up-to-date
+    if local is None or _is_ancestor(store, local, head):
+        update_ref(wit, head_ref(wit), head)  # fast-forward
+        checkout(wit, store, head)
+        return head, []
+    if _is_ancestor(store, head, local):
+        return local, []  # lokaal is al verder; niets te doen
+    # divergent -> samenvoegen tot een merge-commit (geen historieverlies)
+    return reconcile(wit, store, local, head)
 
 
 def clone(remote: Remote, dest: Path) -> Path:

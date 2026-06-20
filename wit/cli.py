@@ -16,7 +16,7 @@ from .fsck import fsck
 from .index import Index
 from .objects import KINDS, ObjectStore, hash_file
 from .refs import head_ref, read_head
-from .remote import FilesystemRemote
+from .remote import make_remote
 from .repo import find_wit, init, read_config, set_remote
 from .status import compute_status
 
@@ -119,45 +119,57 @@ def _remote_path(args: argparse.Namespace, wit) -> str | None:
     return args.remote or read_config(wit).get("remote")
 
 
+def _normalize_spec(spec: str) -> str:
+    # Een kaal lokaal pad absoluut maken zodat het werkt vanuit een andere cwd;
+    # scheme-specs (rclone:/server:/fs:) blijven ongemoeid.
+    if ":" in spec.split("/", 1)[0]:
+        return spec
+    return str(Path(spec).resolve())
+
+
 def cmd_clone(args: argparse.Namespace) -> int:
-    remote_path = Path(args.remote).resolve()
-    remote = FilesystemRemote(remote_path)
-    wit = sync.clone(remote, Path(args.dest))
-    set_remote(wit, str(remote_path))
+    spec = _normalize_spec(args.remote)
+    wit = sync.clone(make_remote(spec), Path(args.dest))
+    set_remote(wit, spec)
     print(f"gekloond naar {wit.parent}")
     return 0
 
 
 def cmd_push(args: argparse.Namespace) -> int:
     wit = find_wit()
-    remote_path = _remote_path(args, wit)
-    if not remote_path:
+    spec = _remote_path(args, wit)
+    if not spec:
         print("geen remote opgegeven of geconfigureerd", file=sys.stderr)
         return 1
     try:
-        head = sync.push(wit, ObjectStore(wit), FilesystemRemote(Path(remote_path)))
+        head = sync.push(wit, ObjectStore(wit), make_remote(_normalize_spec(spec)))
     except ValueError as exc:
         print(exc, file=sys.stderr)
         return 1
-    print(f"gepusht naar {remote_path}: {head[3:11]}")
+    print(f"gepusht naar {spec}: {head[3:11]}")
     return 0
 
 
 def cmd_pull(args: argparse.Namespace) -> int:
     wit = find_wit()
-    remote_path = _remote_path(args, wit)
-    if not remote_path:
+    spec = _remote_path(args, wit)
+    if not spec:
         print("geen remote opgegeven of geconfigureerd", file=sys.stderr)
         return 1
     try:
-        head = sync.pull(wit, ObjectStore(wit), FilesystemRemote(Path(remote_path)))
+        result = sync.pull(wit, ObjectStore(wit), make_remote(_normalize_spec(spec)))
     except ValueError as exc:
         print(exc, file=sys.stderr)
         return 1
-    if head is None:
+    if result is None:
         print("remote is leeg")
-    else:
-        print(f"bijgewerkt naar {head[3:11]}")
+        return 0
+    head, conflicts = result
+    print(f"bijgewerkt naar {head[3:11]}")
+    if conflicts:
+        print(f"{len(conflicts)} conflict(en) — beide versies bewaard:")
+        for path in conflicts:
+            print(f"    {path}")
     return 0
 
 
