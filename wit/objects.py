@@ -88,6 +88,27 @@ class ObjectStore:
             raise KeyError(oid)
         return hash_file(path)
 
+    def path_for(self, kind: str, oid: str) -> Path:
+        """Het pad van een opgeslagen object (voor transport tussen stores)."""
+        return self._path(kind, oid)
+
+    def ingest(self, kind: str, oid: str, src: Path) -> None:
+        """Plaats een bestaand objectbestand (streamende kopie) atomair onder zijn id."""
+        dest = self._path(kind, oid)
+        if dest.exists():
+            return
+        self.tmp_dir.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=self.tmp_dir)
+        os.close(fd)
+        try:
+            shutil.copyfile(src, tmp)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            os.rename(tmp, dest)
+        except BaseException:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+            raise
+
     def put(self, kind: str, data: bytes) -> str:
         """Bewaar bytes; geeft de object-id terug. Idempotent (dedup op hash)."""
         oid = hash_bytes(data)

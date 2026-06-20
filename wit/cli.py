@@ -10,13 +10,14 @@ import argparse
 import sys
 from pathlib import Path
 
-from . import porcelain
+from . import porcelain, sync
 from .commits import log, read_commit
 from .fsck import fsck
 from .index import Index
 from .objects import KINDS, ObjectStore, hash_file
 from .refs import head_ref, read_head
-from .repo import find_wit, init
+from .remote import FilesystemRemote
+from .repo import find_wit, init, read_config, set_remote
 from .status import compute_status
 
 
@@ -114,6 +115,52 @@ def cmd_checkout(args: argparse.Namespace) -> int:
     return 0
 
 
+def _remote_path(args: argparse.Namespace, wit) -> str | None:
+    return args.remote or read_config(wit).get("remote")
+
+
+def cmd_clone(args: argparse.Namespace) -> int:
+    remote_path = Path(args.remote).resolve()
+    remote = FilesystemRemote(remote_path)
+    wit = sync.clone(remote, Path(args.dest))
+    set_remote(wit, str(remote_path))
+    print(f"gekloond naar {wit.parent}")
+    return 0
+
+
+def cmd_push(args: argparse.Namespace) -> int:
+    wit = find_wit()
+    remote_path = _remote_path(args, wit)
+    if not remote_path:
+        print("geen remote opgegeven of geconfigureerd", file=sys.stderr)
+        return 1
+    try:
+        head = sync.push(wit, ObjectStore(wit), FilesystemRemote(Path(remote_path)))
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    print(f"gepusht naar {remote_path}: {head[3:11]}")
+    return 0
+
+
+def cmd_pull(args: argparse.Namespace) -> int:
+    wit = find_wit()
+    remote_path = _remote_path(args, wit)
+    if not remote_path:
+        print("geen remote opgegeven of geconfigureerd", file=sys.stderr)
+        return 1
+    try:
+        head = sync.pull(wit, ObjectStore(wit), FilesystemRemote(Path(remote_path)))
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    if head is None:
+        print("remote is leeg")
+    else:
+        print(f"bijgewerkt naar {head[3:11]}")
+    return 0
+
+
 def cmd_log(args: argparse.Namespace) -> int:
     wit = find_wit()
     history = log(ObjectStore(wit), read_head(wit))
@@ -157,6 +204,19 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("checkout", help="materialiseer een commit in de werkdir")
     p.add_argument("commit", nargs="?", help="commit-id (standaard: HEAD)")
     p.set_defaults(func=cmd_checkout)
+
+    p = sub.add_parser("clone", help="kloon een remote naar een nieuwe map")
+    p.add_argument("remote")
+    p.add_argument("dest")
+    p.set_defaults(func=cmd_clone)
+
+    p = sub.add_parser("push", help="upload commits naar de remote")
+    p.add_argument("remote", nargs="?", help="remote-pad (standaard: geconfigureerd)")
+    p.set_defaults(func=cmd_push)
+
+    p = sub.add_parser("pull", help="haal commits van de remote (fast-forward)")
+    p.add_argument("remote", nargs="?", help="remote-pad (standaard: geconfigureerd)")
+    p.set_defaults(func=cmd_pull)
 
     p = sub.add_parser("hash-object", help="hash (en met -w: bewaar) een bestand")
     p.add_argument("file")

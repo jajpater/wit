@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 
 WIT_DIR = ".wit"
@@ -38,3 +39,21 @@ def find_wit(start: Path | None = None) -> Path:
         if wit.is_dir():
             return wit
     raise FileNotFoundError("geen wit-repository gevonden (.wit ontbreekt)")
+
+
+def read_config(wit: Path) -> dict:
+    return tomllib.loads((Path(wit) / "config.toml").read_text())
+
+
+def _write_config(wit: Path, cfg: dict) -> None:
+    lines = [
+        f'{k} = "{v}"' if isinstance(v, str) else f"{k} = {v}"
+        for k, v in cfg.items()
+    ]
+    (Path(wit) / "config.toml").write_text("\n".join(lines) + "\n")
+
+
+def set_remote(wit: Path, remote_path: str) -> None:
+    cfg = read_config(wit)
+    cfg["remote"] = str(remote_path)
+    _write_config(wit, cfg)
