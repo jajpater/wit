@@ -65,6 +65,13 @@ def cmd_add(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_rm(args: argparse.Namespace) -> int:
+    wit = find_wit()
+    removed = porcelain.rm(wit, ObjectStore(wit), args.paths, keep_file=args.cached)
+    print(f"{removed} bestand(en) niet langer gevolgd")
+    return 0
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     wit = find_wit()
     store = ObjectStore(wit)
@@ -213,6 +220,13 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("add", help="neem bestanden onder beheer")
     p.add_argument("paths", nargs="+")
     p.set_defaults(func=cmd_add)
+
+    p = sub.add_parser("rm", help="haal bestanden uit beheer")
+    p.add_argument("paths", nargs="+")
+    p.add_argument(
+        "--cached", action="store_true", help="alleen untracken, bestand laten staan"
+    )
+    p.set_defaults(func=cmd_rm)
 
     p = sub.add_parser("status", help="toon werkdir t.o.v. de index")
     p.set_defaults(func=cmd_status)

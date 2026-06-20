@@ -47,6 +47,31 @@ def add(wit: Path, store: ObjectStore, targets: Iterable[str]) -> int:
     return count
 
 
+def rm(
+    wit: Path, store: ObjectStore, targets: Iterable[str], *, keep_file: bool = False
+) -> int:
+    """Haal bestanden uit beheer (en verwijder ze, tenzij ``keep_file``).
+
+    Een target mag een bestand of een map zijn; bij een map worden alle gevolgde
+    paden eronder verwijderd. De commit erna mist de paden vanzelf (tree uit de index).
+    """
+    root = wit.parent
+    count = 0
+    with Index(wit) as index:
+        tracked = {e.path for e in index.entries()}
+        for raw in targets:
+            rel = rel_path(Path(raw).resolve(), root)
+            matched = [p for p in tracked if p == rel or p.startswith(rel + "/")]
+            for path in matched:
+                index.remove(path)
+                count += 1
+                if not keep_file:
+                    target = root / path
+                    if target.exists():
+                        target.unlink()
+    return count
+
+
 def commit(wit: Path, store: ObjectStore, message: str, **kw: str) -> str:
     """Leg de staged toestand (de index) vast als commit; geef de commit-id terug."""
     with Index(wit) as index:
