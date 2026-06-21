@@ -280,20 +280,43 @@ Dus: **rclone = transport, "wit" = beheer.**
 Eerst opslagcorrectheid, dan tracking, dan historie, dan pas checkout/transport. Elke
 milestone heeft een hard "klaar wanneer"-criterium.
 
-| M | Inhoud | Klaar wanneer |
-|---|---|---|
-| **M0** | object store + `wit fsck` | put/get werkt; hash klopt; corrupt object gedetecteerd; partial write laat geen half object achter |
-| **M1** | `index.sqlite` + `add` + `status` | untracked/modified correct op een echte map |
-| **M2** | trees + commits + refs + `log` (DAG-traversal) | commit-DAG loopt, id's stabiel; `log` ordent op tijd met visited-set |
-| **M3** | `checkout` / materialisatie | **round-trip byte-identiek** (add → commit → werkdir wissen → checkout → bytes gelijk) |
-| **M4** | hardening: grote bestanden streamend, `.witignore` | TIF van enkele GB zonder geheugenpiek |
-| **M5a** | `FilesystemRemote`, geen packs | clone/pull vanaf lege map byte-identiek |
-| **M5b** | `DumbRcloneRemote` (single-writer, geen remote-GC standaard) | mirror/backup naar cloud werkt; best-effort clobber-detectie op de ref |
-| **M6** | `WitServerRemote`: ref-CAS + locks; reconcile = merge-commit (merge-base/LCA) | push faalt als remote-ref niet meer op parent staat; divergentie → merge-commit, geen historieverlies |
-| **M7** | packs/batching voor cloud-scale | groot-archief push/pull niet gebottleneckt door per-object-latency |
+| M | Inhoud | Klaar wanneer | Status |
+|---|---|---|---|
+| **M0** | object store + `wit fsck` | put/get werkt; hash klopt; corrupt object gedetecteerd; partial write laat geen half object achter | ✅ |
+| **M1** | `index.sqlite` + `add` + `status` | untracked/modified correct op een echte map | ✅ |
+| **M2** | trees + commits + refs + `log` (DAG-traversal) | commit-DAG loopt, id's stabiel; `log` ordent op tijd met visited-set | ✅ |
+| **M3** | `checkout` / materialisatie | **round-trip byte-identiek** (add → commit → werkdir wissen → checkout → bytes gelijk) | ✅ |
+| **M4** | hardening: grote bestanden streamend, `.witignore` | TIF van enkele GB zonder geheugenpiek | ✅ |
+| **M5a** | `FilesystemRemote`, geen packs | clone/pull vanaf lege map byte-identiek | ✅ |
+| **M5b** | `DumbRcloneRemote` (single-writer, geen remote-GC standaard) | mirror/backup naar cloud werkt; best-effort clobber-detectie op de ref | ✅ |
+| **M6** | `WitServerRemote`: ref-CAS + locks; reconcile = merge-commit (merge-base/LCA) | push faalt als remote-ref niet meer op parent staat; divergentie → merge-commit, geen historieverlies | ✅ |
+| **M7** | packs/batching voor cloud-scale | groot-archief push/pull niet gebottleneckt door per-object-latency | ✅ |
 
-Partial checkout blijft **optioneel** (kan richting git-annex-complexiteit gaan): eerst
-volledige materialisatie betrouwbaar maken.
+De volledige bouwvolgorde (M0–M7 + lokale GC) is geïmplementeerd en getest. Partial checkout
+was **optioneel** gemarkeerd, maar is inmiddels gebouwd (sparse cone, zie hieronder), naast de
+volledige materialisatie.
+
+### Voltooid na de MVP
+
+Bovenop de milestones zijn de resterende `DOEL.md`-eisen en een ronde
+correctheid/robuustheid uitgevoerd. Alles porcelain-laag + dunne CLI, alleen `blake3` als
+runtime-dep, met tests (63 in totaal).
+
+| Fase | Inhoud | Sluit aan op |
+|---|---|---|
+| **1** | `wit rm [--cached]` — untracken (+ optioneel verwijderen) | "expliciet bepalen welke bestanden onder beheer komen" |
+| **2** | read-only **webinterface** (`wit serve`, stdlib `http.server`): branches/commits/trees bladeren, blobs streamend serveren | "bestanden en bestandstructuur online te browsen" |
+| **3** | **gedeeltelijke (sparse) checkout** (`.wit/sparse`, `wit sparse set/list`); `status` ziet uitgesloten paden niet als verwijderd | "volledige en gedeeltelijke checkout" |
+| **4** | **retentie "bewaar laatste N"** (`wit gc --keep N`) via een shallow-grens (`.wit/shallow`) die `log` en GC-mark afkappen | "bewaar de laatste 3 versies o.i.d." |
+| **5** | **integriteit in transit**: `ObjectStore.ingest` herhasht vóór de atomic rename en weigert bij mismatch; rclone-bulkpaden krijgen een verificatiepass | crash-/corruptieveiligheid |
+| **6** | **conflict-status** in de index: `reconcile` schrijft keep-both-paden weg, `status` toont een Conflicten-groep tot ze opgelost zijn | reconcile-UX (ontwerpbesluit #5) |
+| **7** | **smart-server GC**: `WitServerRemote.gc()` markt vanaf de remote-refs en veegt onder dezelfde `flock` als de ref-CAS | tweede heilige servertaak (ontwerpbesluit #6) |
+| **8** | **genest `.witignore`**: elke map mag regels hebben voor zijn subboom; root-regels blijven globaal | tracking-fijnafstemming |
+
+Bewust **niet** in scope (zoals eerder afgesproken): een echte netwerkdaemon voor `wit-server`
+(nu lokaal filesystem; de flock-logica is de kern), schrijf-endpoints in de webinterface
+(read-only by design), content-defined chunking / echte packfiles (M7-batching volstaat), en
+shallow **clone/fetch** over het netwerk (retentie is een lokale opruiming).
 
 **Smart vs. dumb remote** — de eerlijke scheiding:
 
@@ -319,13 +342,18 @@ OCC-schema hangt hierop. Twee werkbare routes:
   preconditie niet rechtstreeks — daarvoor de backend-SDK apart aanspreken.
 
 Lockfiles op een eventually-consistent store: vermijden (racy). **Te beslissen vóór M6.**
+*Stand:* de **flock**-route is gebouwd in `WitServerRemote` (lokaal filesystem) en bewijst de
+exactly-one-winner-semantiek; de echte netwerkvarianten (SSH-script, S3 `If-Match`) blijven open
+en zijn een transport-/deploykeuze, niet een wijziging van de wit-laag.
 
 **2. Remote-protocol: object-per-file vs packfiles** (M5).
 Het mechanisme is grotendeels beslist door de typed dirs: "haal alle metadata wholesale
 (`objects/trees/` + `objects/commits/` zijn klein), diff blob-hashes lokaal, haal dán de
 ontbrekende blobs". Maar een groot archief = miljoenen kleine tree-objecten; over
 rclone-naar-cloud met per-operatie-latency wordt dat traag. **Batching/packing** is een open
-beslissing — uitstellen (M5 op fs-remote zonder packs), maar nu benoemd.
+beslissing — uitstellen (M5 op fs-remote zonder packs), maar nu benoemd. *Stand:* M7-**batching**
+is gebouwd (`rclone copy --files-from` → O(1) calls i.p.v. per object; metadata wholesale via
+`fetch_metadata`). Echte packfiles / content-defined chunking blijven bewust buiten scope.
 
 **3. Garbage collection — conservatief beleid (besloten).**
 "Bewaar laatste 3 versies" = mark-and-sweep vanaf de refs, maar nooit onmiddellijk verwijderen:
@@ -339,8 +367,9 @@ De grace-periode is een **royaal vast venster** (dagen — vgl. git's `gc.pruneE
 een trage link kan uren duren. Het venster dekt de GC↔push-race: een net-geüploade blob is jonger
 dan T en wordt niet geveegd. Reikwijdte per remote-type:
 
-* **lokale GC:** toegestaan;
-* **smart remote (wit-server):** later, onder dezelfde lock als de ref-CAS;
+* **lokale GC:** toegestaan; *geïmplementeerd* (`wit gc`, mark → grace → sweep);
+* **smart remote (wit-server):** *geïmplementeerd* — `WitServerRemote.gc()` markt vanaf de
+  remote-refs en veegt onder dezelfde `flock` als de ref-CAS;
 * **dumb remote:** standaard uit (geen veilige plek om reachability + delete te coördineren).
   Gevolg: een dumbe remote is **append-only, onbegrensd groeiend** — prima voor backup/mirror
   (immutability is daar zelfs gewenst), maar "bewaar laatste 3" werkt er niet.
@@ -362,7 +391,9 @@ pad.conflict-<machine>-<commit>.pdf
 plus een conflictstatus in `index.sqlite`. Lelijk maar begrijpelijk, en voor binaire documenten
 beter dan een abstract merge-model (we mergen toch geen bytes). Beide bestanden landen in de tree
 van de **merge-commit**; resolutie-loop: ze bestaan echt → de gebruiker kiest, verwijdert de
-andere, commit → conflict opgeheven.
+andere, commit → conflict opgeheven. *Geïmplementeerd:* `reconcile` schrijft de conflictpaden naar
+een `conflicts`-tabel in de index; `wit status` toont een Conflicten-groep tot een pad opnieuw
+gestaged (`add`) of verwijderd (`rm`) wordt.
 
 **6. De mini-server — twee heilige taken (besloten).**
 Ref-CAS (#1) én GC (#3) willen allebei serverlogica. Voor het volledige doel (veilig
@@ -377,7 +408,9 @@ De rest blijft domme objectopslag. Cruciaal: **de server houdt zelf géén objec
 pure coördinatie (lock + ref-CAS + GC-worker) die dezelfde domme `objects/`-opslag leest.
 Deploy-gevolg: voor GC-reachability heeft de server leestoegang tot `objects/` nodig →
 co-loceren met de opslag. Een volledig domme remote blijft veilig voor backup/single-writer,
-niet voor het volledige doel.
+niet voor het volledige doel. *Geïmplementeerd:* beide taken zitten in `WitServerRemote`
+(`compare_and_swap_ref` en `gc()`, beide onder `flock`); een echte netwerkdaemon zou exact deze
+logica omhullen — nu draait ze op een lokaal filesystem.
 
 **7. Werkdir vs. object store: dubbele opslag.**
 De working dir heeft echte bestanden, de store heeft de blob → in principe 2× opslag. Voor v1:
@@ -387,6 +420,9 @@ ondersteunt; hardlinks vermijden (in-place edits muteren dan de vermeende immuta
 **8. Scope van de webinterface.**
 Een volledige Forgejo-achtige UI is enorme scope. Begin read-only (bladeren door commits,
 bestanden en structuur) en bouw die laag pas na de opslagkern + `add`/`push`/`pull`.
+*Geïmplementeerd:* `wit serve` draait een read-only browser op stdlib `http.server` (geen
+nieuwe dependency) met routes voor branches/commits/trees en streamend serveren van blobs;
+schrijf-endpoints zijn bewust afwezig.
 
 ### Prior art (eerst evalueren)
 
