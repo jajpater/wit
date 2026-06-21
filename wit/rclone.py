@@ -16,6 +16,7 @@ import subprocess
 import tempfile
 from collections import defaultdict
 from collections.abc import Iterable
+from pathlib import Path
 
 from .objects import ObjectStore
 from .remote import META_KINDS, Remote
@@ -67,7 +68,7 @@ class DumbRcloneRemote(Remote):
             result = self._run(["copyto", remote_obj, tmp])
             if result.returncode != 0:
                 raise RcloneError(result.stderr.decode())
-            store.ingest(kind, oid, tmp)
+            store.ingest(kind, oid, Path(tmp))
         finally:
             if os.path.exists(tmp):
                 os.unlink(tmp)
@@ -122,19 +123,26 @@ class DumbRcloneRemote(Remote):
     def download_objects(
         self, store: ObjectStore, items: Iterable[tuple[str, str]]
     ) -> None:
+        items = list(items)
         for kind, rels in self._group(items).items():
             (store.objects_dir / kind).mkdir(parents=True, exist_ok=True)
             self._bulk_copy(
                 self._path("objects", kind), str(store.objects_dir / kind), rels
             )
+        # Bulk-copy gaat buiten ingest om: verifieer de binnengekomen objecten alsnog.
+        for kind, oid in items:
+            store.verify_object(kind, oid)
 
     def fetch_metadata(self, store: ObjectStore) -> None:
         for kind in META_KINDS:
             dest = store.objects_dir / kind
             dest.mkdir(parents=True, exist_ok=True)
+            before = set(store.iter_objects(kind))
             result = self._run(["copy", self._path("objects", kind), str(dest)])
             if result.returncode != 0:
                 raise RcloneError(result.stderr.decode())
+            for oid in set(store.iter_objects(kind)) - before:
+                store.verify_object(kind, oid)
 
     # -- RefStore (best-effort CAS) --
     def read_ref(self, ref: str) -> str | None:

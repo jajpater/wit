@@ -88,12 +88,31 @@ class ObjectStore:
             raise KeyError(oid)
         return hash_file(path)
 
+    def verify_object(self, kind: str, oid: str) -> None:
+        """Controleer een reeds opgeslagen object; verwijder en raise bij corruptie.
+
+        Voor objecten die buiten ``ingest`` om in de store zijn beland (bulk-download via
+        rclone): herbereken de id en vergelijk; bij een mismatch wordt het corrupte bestand
+        verwijderd zodat de store consistent blijft."""
+        actual = self.recompute_id(kind, oid)
+        if actual != oid:
+            self._path(kind, oid).unlink(missing_ok=True)
+            raise ValueError(
+                f"hash-mismatch na download van {kind}: verwacht {oid}, kreeg {actual}"
+            )
+
     def path_for(self, kind: str, oid: str) -> Path:
         """Het pad van een opgeslagen object (voor transport tussen stores)."""
         return self._path(kind, oid)
 
-    def ingest(self, kind: str, oid: str, src: Path) -> None:
-        """Plaats een bestaand objectbestand (streamende kopie) atomair onder zijn id."""
+    def ingest(self, kind: str, oid: str, src: Path, *, verify: bool = True) -> None:
+        """Plaats een bestaand objectbestand (streamende kopie) atomair onder zijn id.
+
+        Standaard wordt de inhoud na de kopie en vóór de rename opnieuw gehasht en
+        vergeleken met ``oid`` (verdediging tegen corruptie-in-transit): bij een mismatch
+        wordt het tmp-bestand verwijderd en een ``ValueError`` opgegooid, zodat een corrupt
+        object nooit onder zijn beweerde id in de store verschijnt. ``verify=False`` slaat
+        de pass over (bijv. voor een vertrouwde lokale kopie)."""
         dest = self._path(kind, oid)
         if dest.exists():
             return
@@ -102,6 +121,12 @@ class ObjectStore:
         os.close(fd)
         try:
             shutil.copyfile(src, tmp)
+            if verify:
+                actual = hash_file(Path(tmp))
+                if actual != oid:
+                    raise ValueError(
+                        f"hash-mismatch bij ingest van {kind}: verwacht {oid}, kreeg {actual}"
+                    )
             dest.parent.mkdir(parents=True, exist_ok=True)
             os.rename(tmp, dest)
         except BaseException:
