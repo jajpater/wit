@@ -43,16 +43,20 @@ def read_commit(store: ObjectStore, oid: str) -> dict:
     return loads(store.get("commits", oid))
 
 
-def log(store: ObjectStore, head: str | None) -> list[tuple[str, dict]]:
+def log(
+    store: ObjectStore, head: str | None, shallow: set[str] | None = None
+) -> list[tuple[str, dict]]:
     """Loop de commit-DAG vanaf ``head`` in topologische volgorde.
 
     Een commit verschijnt altijd vóór zijn parents (kind-vóór-ouder); tussen
     onafhankelijke takken bepaalt de tijd (nieuwste eerst, id als tiebreak). Zo is de
-    volgorde correct, ook als twee commits exact dezelfde tijd hebben.
+    volgorde correct, ook als twee commits exact dezelfde tijd hebben. Bij een
+    ``shallow``-grens wordt niet verder teruggelopen (retentie).
     """
     if head is None:
         return []
 
+    boundary = shallow or set()
     commits: dict[str, dict] = {}
     stack = [head]
     while stack:
@@ -60,7 +64,8 @@ def log(store: ObjectStore, head: str | None) -> list[tuple[str, dict]]:
         if cid in commits:
             continue
         commits[cid] = read_commit(store, cid)
-        stack.extend(commits[cid]["parents"])
+        if cid not in boundary:
+            stack.extend(commits[cid]["parents"])
 
     # Aantal kinderen binnen de bereikbare set: een commit is pas 'klaar' als al zijn
     # kinderen geëmitteerd zijn.

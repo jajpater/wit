@@ -19,6 +19,7 @@ from pathlib import Path
 from .commits import read_commit
 from .index import Index
 from .objects import KINDS, ObjectStore
+from .repo import read_shallow
 from .trees import read_tree
 
 DEFAULT_GRACE_SECONDS = 14 * 24 * 3600  # ~twee weken, vgl. git's gc.pruneExpire
@@ -45,6 +46,7 @@ def _mark_tree(store: ObjectStore, tree_oid: str, reachable: set[tuple[str, str]
 
 def _mark(wit: Path, store: ObjectStore) -> set[tuple[str, str]]:
     reachable: set[tuple[str, str]] = set()
+    shallow = read_shallow(wit)  # bij een grens dalen we niet af naar de parents
     # roots: alle refs onder refs/heads
     heads = wit / "refs" / "heads"
     roots = [p.read_text().strip() for p in heads.glob("*") if p.is_file()]
@@ -56,7 +58,8 @@ def _mark(wit: Path, store: ObjectStore) -> set[tuple[str, str]]:
         reachable.add(("commits", cid))
         commit = read_commit(store, cid)
         _mark_tree(store, commit["tree"], reachable)
-        stack.extend(commit["parents"])
+        if cid not in shallow:
+            stack.extend(commit["parents"])
     # roots: de index (staged, nog niet gecommit)
     with Index(wit) as index:
         for entry in index.entries():

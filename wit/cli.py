@@ -18,7 +18,15 @@ from .index import Index
 from .objects import KINDS, ObjectStore, hash_file
 from .refs import head_ref, read_head
 from .remote import make_remote
-from .repo import find_wit, init, read_config, read_sparse, set_remote, set_sparse
+from .repo import (
+    find_wit,
+    init,
+    read_config,
+    read_shallow,
+    read_sparse,
+    set_remote,
+    set_sparse,
+)
 from .status import compute_status
 
 
@@ -206,7 +214,11 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
 def cmd_gc(args: argparse.Namespace) -> int:
     wit = find_wit()
-    report = gc(wit, ObjectStore(wit), grace_seconds=args.grace)
+    store = ObjectStore(wit)
+    if args.keep is not None:
+        report = porcelain.retain(wit, store, args.keep, grace_seconds=args.grace)
+    else:
+        report = gc(wit, store, grace_seconds=args.grace)
     print(
         f"{report.removed} verwijderd, {report.kept} behouden"
         + (f", {report.skipped_young} binnen grace-venster" if report.skipped_young else "")
@@ -216,7 +228,7 @@ def cmd_gc(args: argparse.Namespace) -> int:
 
 def cmd_log(args: argparse.Namespace) -> int:
     wit = find_wit()
-    history = log(ObjectStore(wit), read_head(wit))
+    history = log(ObjectStore(wit), read_head(wit), read_shallow(wit))
     if not history:
         print("nog geen commits")
         return 0
@@ -270,6 +282,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--grace", type=float, default=DEFAULT_GRACE_SECONDS,
         help="grace-venster in seconden (standaard ~2 weken)",
+    )
+    p.add_argument(
+        "--keep", type=int, default=None,
+        help="bewaar alleen de laatste N commits (retentie)",
     )
     p.set_defaults(func=cmd_gc)
 

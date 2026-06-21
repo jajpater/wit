@@ -71,6 +71,25 @@ def set_sparse(wit: Path, patterns: list[str]) -> None:
     (Path(wit) / "sparse").write_text("\n".join(patterns) + "\n" if patterns else "")
 
 
+def read_shallow(wit: Path) -> set[str]:
+    """Commit-ids waarvan de parents als afwezig gelden (retentie-grens)."""
+    path = Path(wit) / "shallow"
+    if not path.exists():
+        return set()
+    return {line.strip() for line in path.read_text().splitlines() if line.strip()}
+
+
+def write_shallow(wit: Path, commit_ids: set[str]) -> None:
+    text = "\n".join(sorted(commit_ids)) + "\n" if commit_ids else ""
+    (Path(wit) / "shallow").write_text(text)
+
+
+def head_commits(wit: Path) -> list[str]:
+    """Alle commit-ids waar de refs onder refs/heads naar wijzen."""
+    heads = Path(wit) / "refs" / "heads"
+    return [p.read_text().strip() for p in heads.glob("*") if p.is_file()]
+
+
 def sparse_includes(patterns: list[str], rel: str) -> bool:
     """Zit ``rel`` in de cone? (Lege cone = alles inbegrepen.)"""
     if not patterns:

@@ -12,11 +12,18 @@ from collections.abc import Iterable, Iterator
 from pathlib import Path
 
 from .commits import create_commit, read_commit
+from .gc import DEFAULT_GRACE_SECONDS, GcReport, gc
 from .ignore import load_ignore
 from .index import Index, IndexEntry
 from .objects import ObjectStore
 from .refs import head_ref, read_head, update_ref
-from .repo import read_sparse, sparse_includes
+from .repo import (
+    head_commits,
+    read_shallow,
+    read_sparse,
+    sparse_includes,
+    write_shallow,
+)
 from .trees import build_tree, read_tree
 from .worktree import rel_path, walk_files
 
@@ -101,6 +108,38 @@ def iter_tree(
 def tree_map(store: ObjectStore, tree_oid: str) -> dict[str, str]:
     """Platte ``pad -> blob-hash`` van een tree (voor status-vs-HEAD)."""
     return {rel: entry["hash"] for rel, entry in iter_tree(store, tree_oid)}
+
+
+def retain(
+    wit: Path,
+    store: ObjectStore,
+    keep_n: int,
+    *,
+    grace_seconds: float = DEFAULT_GRACE_SECONDS,
+) -> GcReport:
+    """Bewaar per branch de laatste ``keep_n`` commits; ruim de rest op.
+
+    Zet een shallow-grens op de ``keep_n``-de commit (zijn parents gelden daarna als
+    afwezig) en draait dan GC, zodat objecten die uitsluitend bij oudere commits horen
+    worden geveegd. Dit is een *lokale* opruiming; een remote met volledige historie
+    blijft volledig.
+    """
+    if keep_n < 1:
+        raise ValueError("keep_n moet >= 1 zijn")
+    boundaries: set[str] = set()
+    for head in head_commits(wit):
+        cid: str | None = head
+        for _ in range(keep_n - 1):
+            parents = read_commit(store, cid)["parents"]
+            if not parents:
+                cid = None
+                break
+            cid = parents[0]
+        if cid is not None and read_commit(store, cid)["parents"]:
+            boundaries.add(cid)
+    if boundaries:
+        write_shallow(wit, read_shallow(wit) | boundaries)
+    return gc(wit, store, grace_seconds=grace_seconds)
 
 
 def checkout(wit: Path, store: ObjectStore, commit_id: str) -> int:
