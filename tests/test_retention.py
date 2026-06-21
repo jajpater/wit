@@ -1,9 +1,10 @@
 """Fase 4: retentie 'bewaar laatste N' via shallow-grens + GC."""
 
-from wit import porcelain
+from wit import porcelain, sync
 from wit.commits import log
 from wit.objects import ObjectStore
 from wit.refs import read_head
+from wit.remote import FilesystemRemote
 from wit.repo import init, read_shallow
 
 
@@ -34,6 +35,34 @@ def test_retain_keeps_last_n_versions(tmp_path):
 
     # log stopt bij de shallow-grens: nog 2 commits zichtbaar
     visible = log(store, read_head(wit), read_shallow(wit))
+    assert len(visible) == 2
+
+
+def test_push_after_retention_then_clone(tmp_path):
+    # Regressie: na retentie verwijst de shallow-grens naar een lokaal geveegde parent.
+    # push moet bij die grens stoppen i.p.v. de ontbrekende parent te willen lezen, en
+    # een clone van het resultaat moet byte-identiek en fsck-groen zijn.
+    src = tmp_path / "src"
+    src.mkdir()
+    wit = init(src)
+    store = ObjectStore(wit)
+    for i in range(1, 6):
+        (src / "doc.txt").write_bytes(f"versie {i}".encode())
+        porcelain.add(wit, store, [str(src / "doc.txt")])
+        porcelain.commit(wit, store, f"v{i}", time=f"2026-01-0{i}T00:00:00.000000Z")
+
+    porcelain.retain(wit, store, 2, grace_seconds=0)
+    assert read_shallow(wit)  # er staat een grens
+
+    remote = tmp_path / "remote"
+    head = sync.push(wit, store, FilesystemRemote(remote))
+    assert head == read_head(wit)
+
+    cloned = sync.clone(FilesystemRemote(remote), tmp_path / "kloon")
+    assert read_head(cloned) == head
+    assert (tmp_path / "kloon" / "doc.txt").read_bytes() == b"versie 5"
+    # de gekloonde commits zijn compleet bereikbaar (geen dangling parent)
+    visible = log(ObjectStore(cloned), read_head(cloned))
     assert len(visible) == 2
 
 

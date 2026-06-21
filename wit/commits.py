@@ -65,7 +65,11 @@ def log(
             continue
         commits[cid] = read_commit(store, cid)
         if cid not in boundary:
-            stack.extend(commits[cid]["parents"])
+            # Een afwezige parent (door retentie geveegd, hier of op een remote vanwaar
+            # we shallow kloonden) is een impliciete grens: niet proberen te lezen.
+            stack.extend(
+                p for p in commits[cid]["parents"] if store.has("commits", p)
+            )
 
     # Aantal kinderen binnen de bereikbare set: een commit is pas 'klaar' als al zijn
     # kinderen geëmitteerd zijn.

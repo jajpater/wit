@@ -16,11 +16,13 @@ from .objects import ObjectStore
 from .porcelain import checkout
 from .refs import head_ref, read_head, update_ref
 from .remote import MAIN_REF, Remote
-from .repo import init
+from .repo import init, read_shallow
 from .trees import read_tree
 
 
-def _ancestors(store: ObjectStore, head: str | None) -> set[str]:
+def _ancestors(
+    store: ObjectStore, head: str | None, boundary: frozenset[str] = frozenset()
+) -> set[str]:
     seen: set[str] = set()
     stack = [head] if head else []
     while stack:
@@ -28,12 +30,23 @@ def _ancestors(store: ObjectStore, head: str | None) -> set[str]:
         if cid in seen:
             continue
         seen.add(cid)
-        stack.extend(read_commit(store, cid)["parents"])
+        if cid not in boundary:  # retentie-grens: niet verder terug (parents zijn weg)
+            # Een afwezige parent is een natuurlijke shallow-grens (lokaal of remote
+            # geveegd door retentie); behandel hem als horizon i.p.v. te crashen.
+            stack.extend(
+                p for p in read_commit(store, cid)["parents"]
+                if store.has("commits", p)
+            )
     return seen
 
 
-def _is_ancestor(store: ObjectStore, ancestor: str, descendant: str) -> bool:
-    return ancestor in _ancestors(store, descendant)
+def _is_ancestor(
+    store: ObjectStore,
+    ancestor: str,
+    descendant: str,
+    boundary: frozenset[str] = frozenset(),
+) -> bool:
+    return ancestor in _ancestors(store, descendant, boundary)
 
 
 def _reachable_tree(store: ObjectStore, tree_oid: str) -> Iterator[tuple[str, str]]:
@@ -46,9 +59,16 @@ def _reachable_tree(store: ObjectStore, tree_oid: str) -> Iterator[tuple[str, st
 
 
 def _reachable_objects(
-    store: ObjectStore, head: str, have_commits: set[str]
+    store: ObjectStore,
+    head: str,
+    have_commits: set[str],
+    boundary: frozenset[str] = frozenset(),
 ) -> Iterator[tuple[str, str]]:
-    """Alle (kind, oid) bereikbaar vanaf ``head``, exclusief reeds aanwezige commits."""
+    """Alle (kind, oid) bereikbaar vanaf ``head``, exclusief reeds aanwezige commits.
+
+    Stopt bij een retentie-grens (``boundary``): de grens-commit zelf en zijn tree
+    worden nog meegenomen, maar zijn parents niet (die zijn lokaal weggeveegd).
+    """
     seen: set[str] = set()
     stack = [head]
     while stack:
@@ -59,22 +79,26 @@ def _reachable_objects(
         yield "commits", cid
         commit = read_commit(store, cid)
         yield from _reachable_tree(store, commit["tree"])
-        stack.extend(commit["parents"])
+        if cid not in boundary:
+            stack.extend(p for p in commit["parents"] if store.has("commits", p))
 
 
 def push(wit: Path, store: ObjectStore, remote: Remote) -> str:
     local_head = read_head(wit)
     if local_head is None:
         raise ValueError("niets om te pushen (geen commits)")
+    # Lokale retentie kan oudere commits hebben weggeveegd; stop de DAG-walk bij de grens
+    # (de grens-commit refereert aan een parent die lokaal niet meer bestaat).
+    boundary = frozenset(read_shallow(wit))
     remote_head = remote.read_ref(MAIN_REF)
     if remote_head is not None:
         if remote_head == local_head:
             return local_head  # up-to-date
-        if not _is_ancestor(store, remote_head, local_head):
+        if not _is_ancestor(store, remote_head, local_head, boundary):
             raise ValueError("non-fast-forward: eerst pull (reconcile is M6)")
 
-    have = _ancestors(store, remote_head)
-    items = list(_reachable_objects(store, local_head, have))
+    have = _ancestors(store, remote_head, boundary)
+    items = list(_reachable_objects(store, local_head, have, boundary))
     remote.upload_objects(store, items)  # M7: bulk i.p.v. per object
 
     # ref-CAS als laatste stap — de waarheidstransactie

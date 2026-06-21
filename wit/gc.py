@@ -72,7 +72,8 @@ def mark_reachable(
         commit = read_commit(store, cid)
         _mark_tree(store, commit["tree"], reachable)
         if cid not in boundary:
-            stack.extend(commit["parents"])
+            # Afwezige parent (retentie hier of op een shallow-gekloonde remote) = grens.
+            stack.extend(p for p in commit["parents"] if store.has("commits", p))
     return reachable
 
 
