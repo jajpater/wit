@@ -146,19 +146,41 @@ class WitServerRemote(FilesystemRemote):
     de lock op hetzelfde filesystem als de objectopslag.
     """
 
+    def _ref_lock(self, ref: str):
+        locks = self.path / "locks"
+        locks.mkdir(parents=True, exist_ok=True)
+        return open(locks / (ref.replace("/", "_") + ".lock"), "w")
+
     def compare_and_swap_ref(
         self, ref: str, expected: str | None, new: str
     ) -> bool:
-        locks = self.path / "locks"
-        locks.mkdir(parents=True, exist_ok=True)
-        lockfile = locks / (ref.replace("/", "_") + ".lock")
-        with open(lockfile, "w") as handle:
+        with self._ref_lock(ref) as handle:
             fcntl.flock(handle, fcntl.LOCK_EX)
             try:
                 if self.read_ref(ref) != expected:
                     return False
                 self._write_ref(ref, new)
                 return True
+            finally:
+                fcntl.flock(handle, fcntl.LOCK_UN)
+
+    def gc(self, grace_seconds: float | None = None):
+        """De tweede heilige servertaak: veilige GC op de remote zelf.
+
+        Mark vanaf de remote-refs en sweep de remote-objecten, alles onder dezelfde
+        ``flock`` als de ref-CAS op ``main``. Zo kan er tijdens de GC geen push de ref
+        verzetten; objecten van een nog-niet-afgeronde push zijn jong en vallen binnen het
+        grace-venster, dus ze worden niet geveegd (geen GC<->push-race). Dumbe remotes
+        bieden dit bewust niet aan (DOEL.md)."""
+        from .gc import DEFAULT_GRACE_SECONDS, mark_reachable, refs_in, sweep
+
+        grace = DEFAULT_GRACE_SECONDS if grace_seconds is None else grace_seconds
+        with self._ref_lock(MAIN_REF) as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX)
+            try:
+                roots = refs_in(self.path / "refs")
+                reachable = mark_reachable(self.store, roots)
+                return sweep(self.store, reachable, grace)
             finally:
                 fcntl.flock(handle, fcntl.LOCK_UN)
 

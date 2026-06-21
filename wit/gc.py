@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import fcntl
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -44,12 +45,24 @@ def _mark_tree(store: ObjectStore, tree_oid: str, reachable: set[tuple[str, str]
             reachable.add(("blobs", entry["hash"]))
 
 
-def _mark(wit: Path, store: ObjectStore) -> set[tuple[str, str]]:
+def refs_in(refs_dir: Path) -> list[str]:
+    """De commit-ids waar de heads onder ``refs_dir`` naar wijzen (GC-roots)."""
+    heads = refs_dir / "heads"
+    if not heads.exists():
+        return []
+    return [p.read_text().strip() for p in heads.glob("*") if p.is_file()]
+
+
+def mark_reachable(
+    store: ObjectStore, roots: Iterable[str], boundary: frozenset[str] = frozenset()
+) -> set[tuple[str, str]]:
+    """Loop de commit-DAG vanaf ``roots`` en verzamel alle bereikbare objecten.
+
+    Bij een commit in ``boundary`` (retentie-grens) dalen we niet af naar de parents.
+    Werkt op een kale ``ObjectStore`` + roots, dus bruikbaar voor zowel de lokale repo
+    als een remote (smart-server GC).
+    """
     reachable: set[tuple[str, str]] = set()
-    shallow = read_shallow(wit)  # bij een grens dalen we niet af naar de parents
-    # roots: alle refs onder refs/heads
-    heads = wit / "refs" / "heads"
-    roots = [p.read_text().strip() for p in heads.glob("*") if p.is_file()]
     stack = list(roots)
     while stack:
         cid = stack.pop()
@@ -58,8 +71,36 @@ def _mark(wit: Path, store: ObjectStore) -> set[tuple[str, str]]:
         reachable.add(("commits", cid))
         commit = read_commit(store, cid)
         _mark_tree(store, commit["tree"], reachable)
-        if cid not in shallow:
+        if cid not in boundary:
             stack.extend(commit["parents"])
+    return reachable
+
+
+def sweep(
+    store: ObjectStore,
+    reachable: set[tuple[str, str]],
+    grace_seconds: float = DEFAULT_GRACE_SECONDS,
+) -> GcReport:
+    """Verwijder onbereikbare objecten ouder dan het grace-venster."""
+    report = GcReport()
+    now = time.time()
+    for kind in KINDS:
+        for oid in list(store.iter_objects(kind)):
+            if (kind, oid) in reachable:
+                report.kept += 1
+                continue
+            path = store.path_for(kind, oid)
+            if now - path.stat().st_mtime < grace_seconds:
+                report.skipped_young += 1  # grace: te jong om te vegen
+                continue
+            path.unlink()
+            report.removed += 1
+    return report
+
+
+def _mark(wit: Path, store: ObjectStore) -> set[tuple[str, str]]:
+    shallow = read_shallow(wit)  # bij een grens dalen we niet af naar de parents
+    reachable = mark_reachable(store, refs_in(wit / "refs"), frozenset(shallow))
     # roots: de index (staged, nog niet gecommit)
     with Index(wit) as index:
         for entry in index.entries():
@@ -75,20 +116,6 @@ def gc(
     with open(locks / "gc.lock", "w") as handle:
         fcntl.flock(handle, fcntl.LOCK_EX)
         try:
-            reachable = _mark(wit, store)
-            report = GcReport()
-            now = time.time()
-            for kind in KINDS:
-                for oid in list(store.iter_objects(kind)):
-                    if (kind, oid) in reachable:
-                        report.kept += 1
-                        continue
-                    path = store.path_for(kind, oid)
-                    if now - path.stat().st_mtime < grace_seconds:
-                        report.skipped_young += 1  # grace: te jong om te vegen
-                        continue
-                    path.unlink()
-                    report.removed += 1
-            return report
+            return sweep(store, _mark(wit, store), grace_seconds)
         finally:
             fcntl.flock(handle, fcntl.LOCK_UN)
