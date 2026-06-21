@@ -21,6 +21,7 @@ from .worktree import rel_path, walk_files
 @dataclass
 class Status:
     staged: list[str] = field(default_factory=list)
+    staged_deleted: list[str] = field(default_factory=list)
     modified: list[str] = field(default_factory=list)
     deleted: list[str] = field(default_factory=list)
     untracked: list[str] = field(default_factory=list)
@@ -28,9 +29,15 @@ class Status:
 
     @property
     def clean(self) -> bool:
+        # 'schoon' = werkmap gelijk aan de index; staged toevoegingen/verwijderingen zijn
+        # een aparte as (ze wachten op commit) en tellen hier bewust niet mee.
         return not (
             self.modified or self.deleted or self.untracked or self.conflicts
         )
+
+    @property
+    def has_staged(self) -> bool:
+        return bool(self.staged or self.staged_deleted)
 
 
 def _stat_matches(entry: IndexEntry, st) -> bool:
@@ -72,8 +79,18 @@ def compute_status(
         if rel not in seen:
             status.deleted.append(rel)
 
+    # Staged verwijdering: stond in HEAD, maar niet meer in de index (bv. na `wit rm`).
+    # De volgende commit (tree uit de index) laat het pad vanzelf weg.
+    if head_tree is not None:
+        for rel in head_tree:
+            if rel not in entries:
+                status.staged_deleted.append(rel)
+
     status.conflicts = index.conflicts()
 
-    for group in (status.staged, status.modified, status.deleted, status.untracked):
+    for group in (
+        status.staged, status.staged_deleted,
+        status.modified, status.deleted, status.untracked,
+    ):
         group.sort()
     return status

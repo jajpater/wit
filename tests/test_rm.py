@@ -47,6 +47,37 @@ def test_rm_directory_recurses(tmp_path):
     assert not (root / "sub" / "b.txt").exists()
 
 
+def test_status_shows_staged_deletion_after_rm(tmp_path):
+    from wit.status import compute_status
+
+    root, wit, store = _setup(tmp_path)
+    head_tree = porcelain.tree_map(store, read_commit(store, read_head(wit))["tree"])
+    porcelain.rm(wit, store, [str(root / "a.txt")])
+
+    with Index(wit) as index:
+        st = compute_status(index, root, head_tree)
+    # weg uit index én werkmap, maar nog in HEAD -> staged verwijdering, niet 'schoon'
+    assert st.staged_deleted == ["a.txt"]
+    assert st.deleted == []          # geen unstaged deletie (index en werkmap kloppen)
+    assert st.has_staged
+    assert st.clean                  # werkmap is wel gelijk aan de index
+
+
+def test_status_shows_unstaged_deletion(tmp_path):
+    from wit.status import compute_status
+
+    root, wit, store = _setup(tmp_path)
+    head_tree = porcelain.tree_map(store, read_commit(store, read_head(wit))["tree"])
+    (root / "a.txt").unlink()        # alleen uit de werkmap (geen wit rm)
+
+    with Index(wit) as index:
+        st = compute_status(index, root, head_tree)
+    # nog in index én HEAD, weg uit werkmap -> unstaged deletie
+    assert st.deleted == ["a.txt"]
+    assert st.staged_deleted == []
+    assert not st.clean
+
+
 def test_commit_after_rm_omits_path(tmp_path):
     root, wit, store = _setup(tmp_path)
     porcelain.rm(wit, store, [str(root / "a.txt")])

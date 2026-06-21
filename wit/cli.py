@@ -92,12 +92,13 @@ def cmd_status(args: argparse.Namespace) -> int:
         status = compute_status(index, wit.parent, head_tree)
     groups = (
         ("Conflicten (beide versies bewaard — kies, bewerk, voeg toe)", status.conflicts),
-        ("Gewijzigd (niet opnieuw toegevoegd)", status.modified),
         ("Toegevoegd (staged)", status.staged),
-        ("Verwijderd", status.deleted),
+        ("Verwijderd (staged)", status.staged_deleted),
+        ("Gewijzigd (niet opnieuw toegevoegd)", status.modified),
+        ("Verwijderd (niet gestaged)", status.deleted),
         ("Niet gevolgd", status.untracked),
     )
-    if status.clean and not status.staged:
+    if status.clean and not status.has_staged:
         print("werkdirectory schoon, niets toegevoegd")
         return 0
     for title, paths in groups:
