@@ -10,7 +10,7 @@ import os
 from collections.abc import Iterator
 from pathlib import Path
 
-from .ignore import IgnoreRules
+from .ignore import LayeredIgnore
 from .repo import WIT_DIR
 
 
@@ -18,7 +18,7 @@ def walk_files(
     base: Path,
     *,
     root: Path | None = None,
-    ignore: IgnoreRules | None = None,
+    ignore: LayeredIgnore | None = None,
 ) -> Iterator[Path]:
     """Alle bestanden onder ``base`` (recursief), met ``.wit`` gesnoeid.
 

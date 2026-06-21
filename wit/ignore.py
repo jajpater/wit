@@ -2,8 +2,13 @@
 
 Ondersteund: commentaar (``#``), lege regels, glob-patronen (``fnmatch``), mappatronen
 met afsluitende ``/``, en verankering met een leidende ``/``. Een patroon zonder ``/``
-matcht op elk niveau (op een bestands- of mapnaam); een patroon met ``/`` matcht het
-volledige pad vanaf de repository-root. (Geen negatie of ``**`` — dat is later.)
+matcht op elk niveau (op een bestands- of mapnaam); een patroon met ``/`` is verankerd
+aan de map waarin het ``.witignore`` staat. (Geen negatie of ``**`` — dat is later.)
+
+``.witignore`` is genest: elke map mag er een hebben, en die regels gelden alleen voor de
+subboom eronder (verankerde patronen relatief aan die map). Een `LayeredIgnore` bundelt
+alle gevonden bestanden; bij het matchen telt elke laag waarvan de map een voorouder (of
+de map zelf) van het pad is.
 
 Net als bij git geldt ignore alleen voor *niet-gevolgde* bestanden: wat al in de index
 staat blijft gevolgd, ook als het later een patroon matcht.
@@ -11,9 +16,12 @@ staat blijft gevolgd, ook als het later een patroon matcht.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Iterable
 from fnmatch import fnmatch
 from pathlib import Path
+
+from .repo import WIT_DIR
 
 IGNORE_FILE = ".witignore"
 
@@ -52,7 +60,36 @@ class IgnoreRules:
         return False
 
 
-def load_ignore(root: Path) -> IgnoreRules:
-    path = Path(root) / IGNORE_FILE
-    lines = path.read_text().splitlines() if path.exists() else []
-    return IgnoreRules(lines)
+class LayeredIgnore:
+    """Geneste ``.witignore``-regels: per map een ``IgnoreRules``, gestapeld op prefix."""
+
+    def __init__(self, layers: dict[str, IgnoreRules]) -> None:
+        # prefix "" = repo-root; "sub/dir/" = regels van .witignore in die map
+        self.layers = layers
+
+    def match(self, rel: str, is_dir: bool) -> bool:
+        for prefix, rules in self.layers.items():
+            if prefix == "":
+                if rules.match(rel, is_dir):
+                    return True
+            elif rel.startswith(prefix):
+                # match het pad relatief aan de map waarin dit .witignore staat
+                if rules.match(rel[len(prefix):], is_dir):
+                    return True
+        return False
+
+
+def load_ignore(root: Path) -> LayeredIgnore:
+    """Verzamel alle ``.witignore``-bestanden onder ``root`` tot één gelaagde matcher."""
+    root = Path(root)
+    base = root.resolve()
+    layers: dict[str, IgnoreRules] = {}
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d != WIT_DIR]
+        if IGNORE_FILE not in filenames:
+            continue
+        rel_dir = Path(dirpath).resolve().relative_to(base).as_posix()
+        prefix = "" if rel_dir == "." else rel_dir + "/"
+        lines = (Path(dirpath) / IGNORE_FILE).read_text().splitlines()
+        layers[prefix] = IgnoreRules(lines)
+    return LayeredIgnore(layers)
