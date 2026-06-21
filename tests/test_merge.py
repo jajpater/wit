@@ -111,6 +111,41 @@ def test_reconcile_same_path_conflict_keeps_both(tmp_path):
     assert conflict_files[0].read_bytes() == b"versie van a"
 
 
+def test_conflict_shows_in_status_until_resolved(tmp_path):
+    from wit.index import Index
+    from wit.status import compute_status
+
+    remote = _base_remote(tmp_path)
+    a = sync.clone(FilesystemRemote(remote), tmp_path / "a")
+    b = sync.clone(FilesystemRemote(remote), tmp_path / "b")
+
+    _write(tmp_path / "a", "gedeeld.txt", b"versie van a")
+    porcelain.add(a, ObjectStore(a), [str(tmp_path / "a")])
+    porcelain.commit(a, ObjectStore(a), "a", time="2026-01-02T00:00:00.000000Z")
+    sync.push(a, ObjectStore(a), FilesystemRemote(remote))
+
+    _write(tmp_path / "b", "gedeeld.txt", b"versie van b")
+    porcelain.add(b, ObjectStore(b), [str(tmp_path / "b")])
+    porcelain.commit(b, ObjectStore(b), "b", time="2026-01-03T00:00:00.000000Z")
+    sync.pull(b, ObjectStore(b), FilesystemRemote(remote))
+
+    # status toont het conflict en is dus niet schoon
+    with Index(b) as index:
+        st = compute_status(index, b.parent)
+    assert st.conflicts == ["gedeeld.txt"]
+    assert not st.clean
+
+    # gebruiker lost op: kiest een versie, ruimt het conflict-bestand op, add + commit
+    for f in (tmp_path / "b").glob("gedeeld.conflict-*.txt"):
+        f.unlink()
+    (tmp_path / "b" / "gedeeld.txt").write_bytes(b"samengevoegd")
+    porcelain.add(b, ObjectStore(b), [str(tmp_path / "b" / "gedeeld.txt")])
+
+    with Index(b) as index:
+        st = compute_status(index, b.parent)
+    assert st.conflicts == []   # opgelost: weg uit status
+
+
 def test_merge_base_finds_common_ancestor(tmp_path):
     from wit.commits import create_commit
     from wit.trees import build_tree

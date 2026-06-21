@@ -13,7 +13,7 @@ from collections import deque
 from pathlib import Path, PurePosixPath
 
 from .commits import create_commit, read_commit
-from .index import IndexEntry
+from .index import Index, IndexEntry
 from .objects import ObjectStore
 from .porcelain import checkout
 from .refs import head_ref, update_ref
@@ -118,4 +118,10 @@ def reconcile(
     merge_commit = create_commit(store, tree, [ours, theirs], message)
     update_ref(wit, head_ref(wit), merge_commit)
     checkout(wit, store, merge_commit)
+    # Checkout herbouwt de index; markeer daarna de open conflicten zodat `status` ze
+    # toont tot de gebruiker ze oplost (kiezen, bewerken, `add`).
+    if conflicts:
+        with Index(wit) as index:
+            for path in conflicts:
+                index.mark_conflict(path)
     return merge_commit, conflicts

@@ -24,6 +24,9 @@ CREATE TABLE IF NOT EXISTS entries (
     inode     INTEGER NOT NULL,
     staged    INTEGER NOT NULL DEFAULT 1
 );
+CREATE TABLE IF NOT EXISTS conflicts (
+    path TEXT PRIMARY KEY
+);
 """
 
 _UPSERT = """
@@ -66,6 +69,8 @@ class Index:
 
     def put_entry(self, entry: IndexEntry) -> None:
         self.conn.execute(_UPSERT, astuple(entry))
+        # Een pad opnieuw stagen lost zijn eventuele merge-conflict op.
+        self.conn.execute("DELETE FROM conflicts WHERE path = ?", (entry.path,))
 
     def get(self, path: str) -> IndexEntry | None:
         row = self.conn.execute(
@@ -75,6 +80,7 @@ class Index:
 
     def remove(self, path: str) -> None:
         self.conn.execute("DELETE FROM entries WHERE path = ?", (path,))
+        self.conn.execute("DELETE FROM conflicts WHERE path = ?", (path,))
 
     def clear(self) -> None:
         self.conn.execute("DELETE FROM entries")
@@ -82,3 +88,12 @@ class Index:
     def entries(self) -> list[IndexEntry]:
         cur = self.conn.execute("SELECT * FROM entries ORDER BY path")
         return [IndexEntry(**dict(row)) for row in cur]
+
+    def mark_conflict(self, path: str) -> None:
+        self.conn.execute(
+            "INSERT OR IGNORE INTO conflicts (path) VALUES (?)", (path,)
+        )
+
+    def conflicts(self) -> list[str]:
+        cur = self.conn.execute("SELECT path FROM conflicts ORDER BY path")
+        return [row["path"] for row in cur]

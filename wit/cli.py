@@ -91,6 +91,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     with Index(wit) as index:
         status = compute_status(index, wit.parent, head_tree)
     groups = (
+        ("Conflicten (beide versies bewaard — kies, bewerk, voeg toe)", status.conflicts),
         ("Gewijzigd (niet opnieuw toegevoegd)", status.modified),
         ("Toegevoegd (staged)", status.staged),
         ("Verwijderd", status.deleted),

@@ -24,10 +24,13 @@ class Status:
     modified: list[str] = field(default_factory=list)
     deleted: list[str] = field(default_factory=list)
     untracked: list[str] = field(default_factory=list)
+    conflicts: list[str] = field(default_factory=list)
 
     @property
     def clean(self) -> bool:
-        return not (self.modified or self.deleted or self.untracked)
+        return not (
+            self.modified or self.deleted or self.untracked or self.conflicts
+        )
 
 
 def _stat_matches(entry: IndexEntry, st) -> bool:
@@ -68,6 +71,8 @@ def compute_status(
     for rel in entries:
         if rel not in seen:
             status.deleted.append(rel)
+
+    status.conflicts = index.conflicts()
 
     for group in (status.staged, status.modified, status.deleted, status.untracked):
         group.sort()
