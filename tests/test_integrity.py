@@ -19,7 +19,7 @@ def test_ingest_rejects_corrupt_object(tmp_path):
     bogus.write_bytes(b"andere inhoud")  # hasht niet naar oid
     fake = "b3:" + "0" * 64
 
-    with pytest.raises(ValueError, match="hash-mismatch"):
+    with pytest.raises(ValueError, match="hash mismatch"):
         store.ingest("blobs", fake, bogus)
     assert not store.has("blobs", fake)  # corrupt object kwam nooit binnen
     assert store.has("blobs", oid)  # bestaande store ongemoeid
@@ -44,7 +44,7 @@ def test_download_of_tampered_remote_object_fails(tmp_path):
     remote_blob.write_bytes(b"GESABOTEERD")
 
     dest = tmp_path / "clone"
-    with pytest.raises(ValueError, match="hash-mismatch"):
+    with pytest.raises(ValueError, match="hash mismatch"):
         sync.clone(FilesystemRemote(remote_dir), dest)
     # de corrupte blob is niet in de lokale store beland
     assert not ObjectStore(dest / ".wit").has("blobs", blob_oid)

@@ -1,7 +1,7 @@
-"""Het lopen door de werkdirectory — de bron van waarheid voor `status` en `add`.
+"""Walking the working directory — the source of truth for `status` and `add`.
 
-De ``.wit``-map zelf wordt overgeslagen; verder zijn het gewone, echte bestanden.
-Paden worden als relatieve POSIX-paden t.o.v. de repository-root genormaliseerd.
+The ``.wit`` directory itself is skipped; otherwise they are ordinary, real files.
+Paths are normalized as relative POSIX paths w.r.t. the repository root.
 """
 
 from __future__ import annotations
@@ -20,11 +20,11 @@ def walk_files(
     root: Path | None = None,
     ignore: LayeredIgnore | None = None,
 ) -> Iterator[Path]:
-    """Alle bestanden onder ``base`` (recursief), met ``.wit`` gesnoeid.
+    """All files under ``base`` (recursively), with ``.wit`` pruned.
 
-    Een expliciet genoemd bestand wordt altijd opgeleverd. Tijdens het aflopen van een
-    map worden, als ``root`` en ``ignore`` gegeven zijn, genegeerde mappen gesnoeid en
-    genegeerde bestanden overgeslagen.
+    An explicitly specified file is always yielded. During the traversal of a
+    directory, if ``root`` and ``ignore`` are given, ignored directories are pruned and
+    ignored files are skipped.
     """
     base = Path(base)
     if base.is_file():

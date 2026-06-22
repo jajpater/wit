@@ -1,10 +1,10 @@
-"""`status`: vergelijk de werkdirectory met de index (en met HEAD).
+"""`status`: compare the working directory with the index (and with HEAD).
 
-Verander-detectie volgt git's snelle pad: matcht ``(size, mtime, device, inode)`` met de
-index-entry, dan nemen we de inhoud ongewijzigd aan; anders herhashen we om een echte
-wijziging van een loutere aanraking te onderscheiden. Is er een HEAD-tree meegegeven, dan
-geldt een ongewijzigd, gevolgd bestand als *schoon* wanneer zijn hash gelijk is aan HEAD,
-en anders als *staged*; zonder HEAD (nog geen commits) is alles in de index 'staged'.
+Change detection follows git's fast path: if ``(size, mtime, device, inode)`` matches the
+index entry, we assume the content is unchanged; otherwise we re-hash to distinguish a real
+change from a mere touch. If a HEAD tree is provided, an
+unchanged, tracked file is considered *clean* if its hash matches HEAD,
+and otherwise *staged*; without HEAD (no commits yet), everything in the index is 'staged'.
 """
 
 from __future__ import annotations
@@ -29,8 +29,8 @@ class Status:
 
     @property
     def clean(self) -> bool:
-        # 'schoon' = werkmap gelijk aan de index; staged toevoegingen/verwijderingen zijn
-        # een aparte as (ze wachten op commit) en tellen hier bewust niet mee.
+        # 'clean' = working directory equals the index; staged additions/deletions are
+        # a separate axis (they wait for commit) and intentionally don't count here.
         return not (
             self.modified or self.deleted or self.untracked or self.conflicts
         )
@@ -63,7 +63,7 @@ def compute_status(
         seen.add(rel)
         entry = entries.get(rel)
         if entry is None:
-            # ignore geldt alleen voor niet-gevolgde bestanden (git-semantiek)
+            # ignore only applies to untracked files (git semantics)
             if not ignore.match(rel, False):
                 status.untracked.append(rel)
             continue
@@ -71,7 +71,7 @@ def compute_status(
         if not unchanged:
             status.modified.append(rel)
         elif head_tree is not None and head_tree.get(rel) == entry.hash:
-            pass  # gevolgd, ongewijzigd én gelijk aan HEAD -> schoon
+            pass  # tracked, unchanged and equal to HEAD -> clean
         else:
             status.staged.append(rel)
 
@@ -79,8 +79,8 @@ def compute_status(
         if rel not in seen:
             status.deleted.append(rel)
 
-    # Staged verwijdering: stond in HEAD, maar niet meer in de index (bv. na `wit rm`).
-    # De volgende commit (tree uit de index) laat het pad vanzelf weg.
+    # Staged deletion: was in HEAD, but no longer in the index (e.g. after `wit rm`).
+    # The next commit (tree from the index) naturally omits the path.
     if head_tree is not None:
         for rel in head_tree:
             if rel not in entries:

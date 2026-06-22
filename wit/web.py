@@ -1,11 +1,11 @@
-"""Read-only webinterface: blader online door commits, trees en bestanden.
+"""Read-only web interface: browse commits, trees and files online.
 
-Server-side gerenderd met de stdlib (``http.server``), geen dependency, geen JS. Bestanden
-worden streamend vanaf de object store geserveerd (geheugen-zuinig, ook voor grote
-documenten). Bewust alleen-lezen: er zijn geen schrijf-endpoints.
+Server-side rendered with the stdlib (``http.server``), no dependencies, no JS. Files
+are served streaming from the object store (memory efficient, even for large
+documents). Intentionally read-only: there are no write endpoints.
 
-De resolutie-helpers (`resolve_commit`, `tree_listing`, `blob_entry`) zijn pure functies,
-los van HTTP, zodat ze rechtstreeks te testen zijn.
+The resolution helpers (`resolve_commit`, `tree_listing`, `blob_entry`) are pure functions,
+decoupled from HTTP, so they can be tested directly.
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from .commits import log, read_commit
+from .i18n import _
 from .objects import ObjectStore
 from .refs import read_head
 from .trees import read_tree
@@ -43,7 +44,7 @@ def _tree_at(store: ObjectStore, root_tree: str, subpath: str) -> str | None:
 def tree_listing(
     store: ObjectStore, commit_id: str, subpath: str = ""
 ) -> list[tuple[str, dict]] | None:
-    """Gesorteerde (naam, entry)-lijst van een directory binnen een commit."""
+    """Sorted (name, entry) list of a directory inside a commit."""
     root = read_commit(store, commit_id)["tree"]
     tree = _tree_at(store, root, subpath)
     if tree is None:
@@ -89,7 +90,7 @@ def _breadcrumbs(commit_id: str, subpath: str) -> str:
 def render_index(store: ObjectStore, wit: Path) -> bytes:
     head = read_head(wit)
     if head is None:
-        return _page("wit", "<p>nog geen commits</p>")
+        return _page("wit", f"<p>{_('no commits yet')}</p>")
     rows = []
     for cid, commit in log(store, head):
         short = html.escape(cid[3:11])
@@ -100,8 +101,8 @@ def render_index(store: ObjectStore, wit: Path) -> bytes:
             f'{msg} <span class="meta">{when}</span></li>'
         )
     body = (
-        f'<p><a href="/tree/HEAD/">📂 blader door HEAD</a></p>'
-        f"<h2>commits</h2><ul>{''.join(rows)}</ul>"
+        f'<p><a href="/tree/HEAD/">📂 {_("browse HEAD")}</a></p>'
+        f"<h2>{_('commits')}</h2><ul>{''.join(rows)}</ul>"
     )
     return _page("wit", body)
 
@@ -141,7 +142,7 @@ def render_commit(store: ObjectStore, commit_id: str) -> bytes:
         f'<p class="meta">{html.escape(commit["time"])} · {html.escape(commit["host"])}</p>'
         f"<p>{html.escape(commit['message'])}</p>"
         f"<p>parents: {parents or '—'}</p>"
-        f'<p><a href="/tree/{html.escape(commit_id)}/">📂 blader door deze commit</a></p>'
+        f'<p><a href="/tree/{html.escape(commit_id)}/">📂 {_("browse this commit")}</a></p>'
     )
     return _page(f"commit {commit_id[3:11]}", body)
 
@@ -180,21 +181,21 @@ class _Handler(BaseHTTPRequestHandler):
                 commit = resolve_commit(self._wit, parts[1]) or parts[1]
                 page = render_tree(self._store, commit, "/".join(parts[2:]))
                 if page is None:
-                    self._send_html(_page("404", "<p>niet gevonden</p>"), 404)
+                    self._send_html(_page("404", f"<p>{_('not found')}</p>"), 404)
                 else:
                     self._send_html(page)
             elif parts[0] == "blob" and len(parts) >= 3:
                 commit = resolve_commit(self._wit, parts[1]) or parts[1]
                 self._serve_blob(commit, "/".join(parts[2:]), "download" in query)
             else:
-                self._send_html(_page("404", "<p>niet gevonden</p>"), 404)
+                self._send_html(_page("404", f"<p>{_('not found')}</p>"), 404)
         except (KeyError, ValueError):
-            self._send_html(_page("404", "<p>niet gevonden</p>"), 404)
+            self._send_html(_page("404", f"<p>{_('not found')}</p>"), 404)
 
     def _serve_blob(self, commit_id: str, path: str, download: bool) -> None:
         entry = blob_entry(self._store, commit_id, path)
         if entry is None:
-            self._send_html(_page("404", "<p>niet gevonden</p>"), 404)
+            self._send_html(_page("404", f"<p>{_('not found')}</p>"), 404)
             return
         name = path.rsplit("/", 1)[-1]
         ctype = mimetypes.guess_type(name)[0] or "application/octet-stream"
@@ -218,7 +219,7 @@ def make_server(wit: Path, host: str = "127.0.0.1", port: int = 8000) -> Threadi
 
 def serve(wit: Path, host: str = "127.0.0.1", port: int = 8000) -> None:
     server = make_server(wit, host, port)
-    print(f"wit-webinterface op http://{host}:{port}  (Ctrl-C om te stoppen)")
+    print(_("wit web interface at http://{host}:{port}  (Ctrl-C to stop)").format(host=host, port=port))
     try:
         server.serve_forever()
     except KeyboardInterrupt:

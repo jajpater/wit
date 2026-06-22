@@ -1,18 +1,18 @@
-# wit — een git voor documenten
+# wit — a git for documents
 
-`wit` beheert **bestanden** (pdf, docx, jpg, tif, … alles) zoals git broncode beheert:
-één centrale repository, content-addressed opslag, push/pull/clone/checkout. Het grote
-verschil met git-annex en Git LFS: **in je werkmap staan altijd echte bestanden, nooit
-symlinks**. Je opent, annoteert, doorzoekt en backupt ze als gewone bestanden; de interne
-object store merk je nooit.
+`wit` manages **files** (pdf, docx, jpg, tif, … everything) like git manages source code:
+one central repository, content-addressed storage, push/pull/clone/checkout. The big
+difference with git-annex and Git LFS: **your working directory always contains real files, never
+symlinks**. You open, annotate, search, and back them up like regular files; you will never notice the internal
+object store.
 
-Het volledige ontwerp staat in [DOEL.md](DOEL.md). Dit is de praktische handleiding.
+The complete design is in [DOEL.md](DOEL.md). This is the practical manual.
 
 ---
 
-## Installeren
+## Installation
 
-`wit` heeft Python ≥ 3.11 nodig en één afhankelijkheid (`blake3`).
+`wit` requires Python ≥ 3.11 and one dependency (`blake3`).
 
 ```bash
 cd wit
@@ -21,82 +21,82 @@ source .venv/bin/activate
 pip install -e .
 ```
 
-Daarna is het commando `wit` beschikbaar (zolang de venv actief is). Test het:
+After that, the `wit` command is available (as long as the venv is active). Test it:
 
 ```bash
 wit --help
 ```
 
-> Zonder de venv te activeren kun je ook `./.venv/bin/wit …` gebruiken.
+> Without activating the venv, you can also use `./.venv/bin/wit …`.
 
 ---
 
-## In één minuut
+## In one minute
 
 ```bash
-mkdir bibliotheek && cd bibliotheek
-wit init                      # maak een lege repository (.wit/)
-echo "hallo" > boek.txt
-wit add boek.txt              # neem het bestand onder beheer
-wit commit -m "eerste import" # leg de toestand vast
-wit log                       # bekijk de historie
+mkdir library && cd library
+wit init                      # create an empty repository (.wit/)
+echo "hello" > book.txt
+wit add book.txt              # put the file under management
+wit commit -m "first import"  # record the state
+wit log                       # view the history
 ```
 
-Dat is de hele kern: `init` → `add` → `commit`. De rest hieronder is uitbreiding.
+That is the entire core: `init` → `add` → `commit`. The rest below is extension.
 
 ---
 
-## De basisworkflow
+## The basic workflow
 
 ### `wit init`
-Maakt een `.wit/`-map aan in de huidige map. Dat is je repository; verder zie je alleen je
-eigen bestanden.
+Creates a `.wit/` directory in the current directory. That is your repository; otherwise, you only see your
+own files.
 
-### `wit add <pad>…`
-Neemt bestanden of hele mappen onder beheer. Een map wordt recursief afgelopen.
+### `wit add <path>…`
+Puts files or entire directories under management. A directory is traversed recursively.
 
 ```bash
-wit add boek.txt              # één bestand
-wit add artikelen/            # een hele map
-wit add .                     # alles in de huidige map
+wit add book.txt              # one file
+wit add articles/             # an entire directory
+wit add .                     # everything in the current directory
 ```
 
-Wat je niet wilt meenemen, zet je in een `.witignore` (zie verderop).
+What you do not want to include, you put in a `.witignore` (see below).
 
 ### `wit status`
-Toont wat er veranderd is t.o.v. wat je hebt vastgelegd: nieuw (untracked), gewijzigd,
-toegevoegd (staged) en verwijderd.
+Shows what has changed compared to what you have committed: new (untracked), modified,
+added (staged) and deleted.
 
-### `wit commit -m "bericht"`
-Legt de huidige toestand vast als een **commit** (een onveranderlijk momentpunt). Elke
-commit heeft een unieke id en verwijst naar zijn voorganger(s).
+### `wit commit -m "message"`
+Records the current state as a **commit** (an immutable snapshot). Each
+commit has a unique id and refers to its predecessor(s).
 
 ### `wit log`
-Toont de commit-historie, nieuwste eerst.
+Shows the commit history, newest first.
 
-### `wit rm <pad>…`
-Haalt een bestand uit beheer **en verwijdert het** uit je werkmap. Wil je het bestand laten
-staan en alleen "untracken"?
+### `wit rm <path>…`
+Removes a file from management **and deletes it** from your working directory. Do you want to keep the file
+and only "untrack" it?
 
 ```bash
-wit rm --cached oud.txt       # uit beheer, bestand blijft op schijf
+wit rm --cached old.txt       # remove from management, file remains on disk
 ```
 
-De eerstvolgende `commit` weerspiegelt de verwijdering vanzelf.
+The next `commit` will reflect the removal automatically.
 
 ---
 
-## Terughalen: checkout
+## Restoring: checkout
 
-`wit checkout` schrijft de bestanden van een commit terug naar je werkmap — als **echte
-bestanden**. Dit is de "ramp-test": gooi alles weg en haal het terug.
+`wit checkout` writes the files of a commit back to your working directory — as **real
+files**. This is the "disaster test": throw everything away and bring it back.
 
 ```bash
-rm -rf boek.txt artikelen     # werkmap leeggooien
-wit checkout                  # HEAD terugzetten (byte-identiek)
+rm -rf book.txt articles      # empty working directory
+wit checkout                  # restore HEAD (byte-identical)
 ```
 
-Geef een commit-id mee om een oudere toestand terug te zetten:
+Pass a commit-id to restore an older state:
 
 ```bash
 wit checkout b3:a6e2cff5…
@@ -104,167 +104,160 @@ wit checkout b3:a6e2cff5…
 
 ---
 
-## Gedeeltelijke checkout (sparse)
+## Partial checkout (sparse)
 
-Heb je een enorme collectie maar wil je op deze machine maar een deel materialiseren? Stel
-een **sparse cone** in: alleen paden binnen die prefixen worden uitgecheckt.
+Do you have a massive collection but only want to materialize a part on this machine? Set
+a **sparse cone**: only paths within those prefixes are checked out.
 
 ```bash
-wit sparse set artikelen/     # alleen deze submap materialiseren
-wit sparse list               # toon de huidige cone
-wit sparse set                # leeg = weer alles
+wit sparse set articles/      # only materialize this subdirectory
+wit sparse list               # show the current cone
+wit sparse set                # empty = everything again
 ```
 
-`wit checkout` respecteert de cone, en `status` ziet de uitgesloten paden niet als
-"verwijderd". Handig op een laptop met weinig schijfruimte.
+`wit checkout` respects the cone, and `status` does not see the excluded paths as
+"deleted". Handy on a laptop with little disk space.
 
 ---
 
-## Synchroniseren met een andere plek
+## Synchronizing with another location
 
-Een **remote** is een tweede kopie van de repository — een andere map, een schijf, of een
-cloud-backend via [rclone](https://rclone.org/).
+A **remote** is a second copy of the repository — another directory, a disk, or a
+cloud backend via [rclone](https://rclone.org/).
 
-### Soorten remotes (slim vs. dom)
+### Types of remotes (smart vs. dumb)
 
-Net als bij git maken we onderscheid tussen **domme** en **slimme** remotes:
-- **Domme remotes** slaan alleen bestanden op. Dit is prima voor back-ups of als je er in je eentje aan werkt, maar minder veilig als twee mensen tegelijk wijzigingen sturen.
-- **Slimme remotes** snappen wat een 'push' is en voorkomen actief dat gegevens door elkaar raken als meerdere mensen tegelijkertijd wijzigingen sturen.
+Just like with git, we distinguish between **dumb** and **smart** remotes:
+- **Dumb remotes** only store files. This is fine for backups or if you are working on it alone, but less safe if two people push changes at the same time.
+- **Smart remotes** understand what a 'push' is and actively prevent data from getting mixed up when multiple people send changes simultaneously.
 
-| Spec | Soort | Betekenis |
+| Spec | Type | Meaning |
 |---|---|---|
-| `/pad/naar/remote` of `fs:/pad` | Dom | Een gewone map (lokaal of op een gemounte schijf). |
-| `server:/pad` | Slim | Zelfde map, maar veilig om te gebruiken als meerdere mensen er tegelijk naar pushen. |
-| `rclone:b2:bucket/repo` | Dom | Elk rclone-backend (S3, B2, Drive, SFTP, WebDAV, …). |
+| `/path/to/remote` or `fs:/path` | Dumb | A regular directory (local or on a mounted disk). |
+| `server:/path` | Smart | Same directory, but safe to use if multiple people push to it at the same time. |
+| `rclone:b2:bucket/repo` | Dumb | Any rclone backend (S3, B2, Drive, SFTP, WebDAV, …). |
 
 ### Push, clone, pull
 
 ```bash
-# machine A: stuur je repository naar de remote
-wit push /pad/naar/remote
+# machine A: send your repository to the remote
+wit push /path/to/remote
 
-# machine B: haal de hele repository op
-wit clone /pad/naar/remote bibliotheek
-cd bibliotheek
+# machine B: fetch the entire repository
+wit clone /path/to/remote library
+cd library
 
-# later: nieuwe commits ophalen
+# later: fetch new commits
 wit pull
 ```
 
-**Hoe maak je een remote aan?**
-Niet! Je hoeft een remote niet vooraf te initialiseren. Zodra je voor het eerst pusht naar een pad (lokaal, op een server of via rclone), maakt `wit` daar automatisch de benodigde opslagstructuur aan. Na een eerste `push` of `clone` onthoudt `wit` de remote, zodat je daarna simpelweg `wit push` / `wit pull` zonder pad kunt typen.
+**How do you create a remote?**
+You don't! You don't have to initialize a remote beforehand. As soon as you push to a path for the first time (locally, on a server, or via rclone), `wit` automatically creates the necessary storage structure there. After a first `push` or `clone`, `wit` remembers the remote, so you can simply type `wit push` / `wit pull` without a path afterwards.
 
-`push` is crash-veilig: eerst worden alle objecten geüpload, en pas als laatste stap
-verspringt de branch-pointer. Een afgebroken push laat hooguit wat ongebruikte objecten
-achter, nooit een kapotte repository.
+`push` is crash-safe: all objects are uploaded first, and only as the last step does the branch pointer jump. An aborted push leaves at most some unused objects behind, never a broken repository.
 
-### Als push wordt geweigerd
+### If push is rejected
 
-Heeft iemand anders intussen gepusht, dan weigert `wit push` (non-fast-forward). Doe eerst
-`wit pull`: gelijklopende wijzigingen worden samengevoegd. Wijzigen twee kanten **hetzelfde**
-bestand, dan blijft je eigen versie op de oorspronkelijke naam staan en komt de andere ernaast
-als `bestand.conflict-<machine>-<commit>.ext`. `wit status` toont dan een **Conflicten**-groep;
-je kiest de juiste versie, verwijdert de andere, en doet `add` + `commit` om het op te lossen.
+If someone else has pushed in the meantime, `wit push` refuses (non-fast-forward). First do `wit pull`: concurrent changes are merged. If both sides modify the **same** file, your own version stays on the original name and the other one appears next to it as `file.conflict-<machine>-<commit>.ext`. `wit status` then shows a **Conflicts** group; you pick the correct version, delete the other, and do `add` + `commit` to resolve it.
 
 ---
 
-## Online bladeren
+## Browsing online
 
 ```bash
-wit serve                     # standaard op http://127.0.0.1:8000
+wit serve                     # defaults to http://127.0.0.1:8000
 wit serve --port 8137 --host 0.0.0.0
 ```
 
-Open de URL in je browser: blader door commits, mappen en bestanden, en download bestanden.
-De webinterface is **alleen-lezen** (geen schrijfacties), precies om veilig te kunnen delen.
+Open the URL in your browser: browse through commits, directories, and files, and download files.
+The web interface is **read-only** (no write actions), exactly to be able to share safely.
 
 ---
 
-## Versies opruimen (retentie)
+## Cleaning up versions (retention)
 
-`wit` is geen volledig versiebeheer, maar onthoudt wel je historie. Wil je alleen de laatste
-paar versies bewaren en de rest opruimen?
+`wit` is not a full version control system, but it does remember your history. Do you only want to keep the last
+few versions and clean up the rest?
 
 ```bash
-wit gc --keep 2               # bewaar de laatste 2 commits, ruim oudere op
-wit gc                        # gewone opruiming van ongebruikte objecten
+wit gc --keep 2               # keep the last 2 commits, clean up older ones
+wit gc                        # regular cleanup of unused objects
 ```
 
-Dit is een **lokale** opruiming. Een remote met volledige historie blijft volledig; je kunt
-na het opruimen nog gewoon pushen.
+This is a **local** cleanup. A remote with a full history remains full; you can
+still push normally after cleaning up.
 
-> `gc` verwijdert niet meteen: net-geschreven objecten zijn beschermd door een grace-venster
-> (standaard ~2 weken). Tijdens experimenteren kun je `--grace 0` gebruiken om dat over te
-> slaan.
+> `gc` does not delete immediately: recently written objects are protected by a grace window
+> (default ~2 weeks). During experimentation, you can use `--grace 0` to skip that.
 
 ---
 
-## Controleren of alles klopt
+## Checking if everything is correct
 
 ```bash
-wit fsck                      # herbereken alle hashes; meldt corruptie
+wit fsck                      # recalculate all hashes; reports corruption
 ```
 
-Omdat elk object naar zijn eigen BLAKE3-hash is genoemd, is corruptie meteen detecteerbaar.
-Bij `pull`/`clone` wordt elk binnengekomen object bovendien geverifieerd voordat het in de
-store belandt.
+Because each object is named after its own BLAKE3 hash, corruption is immediately detectable.
+With `pull`/`clone`, every incoming object is additionally verified before it ends up in the
+store.
 
 ---
 
 ## `.witignore`
 
-Net als `.gitignore`. Eén per map mag; regels in een submap gelden alleen voor die submap.
+Just like `.gitignore`. One per directory is allowed; rules in a subdirectory only apply to that subdirectory.
 
 ```
-*.tmp           # negeer alle .tmp-bestanden (op elk niveau)
-build/          # negeer de map build/ en alles erin
-/alleen-root    # alleen in de map waar dit .witignore staat
+*.tmp           # ignore all .tmp files (at any level)
+build/          # ignore the build/ directory and everything in it
+/only-root      # only in the directory where this .witignore is located
 ```
 
-Ignore geldt alleen voor nog niet-gevolgde bestanden. Een bestand dat je expliciet noemt
-(`wit add bestand.tmp`) wordt altijd toegevoegd, ook als een patroon het zou negeren.
+Ignore only applies to not-yet-tracked files. A file you explicitly name
+(`wit add file.tmp`) is always added, even if a pattern would ignore it.
 
 ---
 
-## Debug-commando's
+## Debug commands
 
-Voor wie onder de motorkap wil kijken:
+For those who want to look under the hood:
 
 ```bash
-wit hash-object boek.txt      # toon de BLAKE3-id van een bestand
-wit hash-object -w boek.txt   # … en bewaar het als blob
-wit cat-object blobs b3:…     # schrijf de ruwe bytes van een object naar stdout
+wit hash-object book.txt      # show the BLAKE3 id of a file
+wit hash-object -w book.txt   # … and save it as a blob
+wit cat-object blobs b3:…     # write the raw bytes of an object to stdout
 ```
 
 ---
 
-## Spiekbriefje
+## Cheat sheet
 
-| Commando | Doel |
+| Command | Purpose |
 |---|---|
-| `wit init` | nieuwe repository |
-| `wit add <pad>` | onder beheer nemen |
-| `wit rm [--cached] <pad>` | uit beheer halen |
-| `wit status` | wat is er veranderd |
-| `wit commit -m "…"` | toestand vastleggen |
-| `wit log` | historie tonen |
-| `wit checkout [commit]` | bestanden terugzetten |
-| `wit sparse set/list` | gedeeltelijke checkout |
-| `wit clone <remote> <map>` | repository ophalen |
-| `wit push [remote]` | wijzigingen versturen |
-| `wit pull [remote]` | wijzigingen ophalen |
-| `wit serve` | webinterface starten |
-| `wit gc [--keep N]` | opruimen / retentie |
-| `wit fsck` | integriteit controleren |
+| `wit init` | new repository |
+| `wit add <path>` | put under management |
+| `wit rm [--cached] <path>` | remove from management |
+| `wit status` | what has changed |
+| `wit commit -m "…"` | record state |
+| `wit log` | show history |
+| `wit checkout [commit]` | restore files |
+| `wit sparse set/list` | partial checkout |
+| `wit clone <remote> <dir>` | fetch repository |
+| `wit push [remote]` | send changes |
+| `wit pull [remote]` | fetch changes |
+| `wit serve` | start web interface |
+| `wit gc [--keep N]` | clean up / retention |
+| `wit fsck` | check integrity |
 
 ---
 
-## Voor ontwikkelaars
+## For developers
 
 ```bash
-.venv/bin/python -m pytest -q   # de volledige testsuite
+.venv/bin/python -m pytest -q   # the full test suite
 ```
 
-De code is gelaagd: een dunne CLI (`wit/cli.py`) bovenop een porcelain-laag
-(`wit/porcelain.py`, `wit/sync.py`) bovenop modules per objecttype (objects, trees, commits,
-refs, index). Alleen `blake3` is een runtime-afhankelijkheid; de rest is Python-stdlib.
+The code is layered: a thin CLI (`wit/cli.py`) on top of a porcelain layer
+(`wit/porcelain.py`, `wit/sync.py`) on top of modules per object type (objects, trees, commits,
+refs, index). Only `blake3` is a runtime dependency; the rest is Python stdlib.

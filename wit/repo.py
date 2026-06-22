@@ -1,9 +1,11 @@
-"""Repository-layout: initialiseren en het vinden van de ``.wit``-map."""
+"""Repository layout: initialization and finding the ``.wit`` directory."""
 
 from __future__ import annotations
 
 import tomllib
 from pathlib import Path
+
+from .i18n import _
 
 WIT_DIR = ".wit"
 
@@ -20,10 +22,10 @@ _CONFIG = 'object_format_version = 1\nhash = "blake3"\n'
 
 
 def init(root: Path) -> Path:
-    """Maak een lege repository onder ``root`` en geef het ``.wit``-pad terug."""
+    """Create an empty repository under ``root`` and return the ``.wit`` path."""
     wit = Path(root) / WIT_DIR
     if wit.exists():
-        raise FileExistsError(f"{wit} bestaat al")
+        raise FileExistsError(_("{wit} already exists").format(wit=wit))
     for sub in _LAYOUT:
         (wit / sub).mkdir(parents=True)
     (wit / "HEAD").write_text("ref: refs/heads/main\n")
@@ -32,13 +34,13 @@ def init(root: Path) -> Path:
 
 
 def find_wit(start: Path | None = None) -> Path:
-    """Loop omhoog vanaf ``start`` (of cwd) tot een ``.wit``-map gevonden is."""
+    """Walk up from ``start`` (or cwd) until a ``.wit`` directory is found."""
     path = Path(start or Path.cwd()).resolve()
     for candidate in (path, *path.parents):
         wit = candidate / WIT_DIR
         if wit.is_dir():
             return wit
-    raise FileNotFoundError("geen wit-repository gevonden (.wit ontbreekt)")
+    raise FileNotFoundError(_("no wit repository found (.wit missing)"))
 
 
 def read_config(wit: Path) -> dict:
@@ -60,7 +62,7 @@ def set_remote(wit: Path, remote_path: str) -> None:
 
 
 def read_sparse(wit: Path) -> list[str]:
-    """De sparse-cone (padprefixen); leeg = volledige checkout."""
+    """The sparse cone (path prefixes); empty = full checkout."""
     path = Path(wit) / "sparse"
     if not path.exists():
         return []
@@ -72,7 +74,7 @@ def set_sparse(wit: Path, patterns: list[str]) -> None:
 
 
 def read_shallow(wit: Path) -> set[str]:
-    """Commit-ids waarvan de parents als afwezig gelden (retentie-grens)."""
+    """Commit-ids whose parents are considered absent (retention boundary)."""
     path = Path(wit) / "shallow"
     if not path.exists():
         return set()
@@ -85,13 +87,13 @@ def write_shallow(wit: Path, commit_ids: set[str]) -> None:
 
 
 def head_commits(wit: Path) -> list[str]:
-    """Alle commit-ids waar de refs onder refs/heads naar wijzen."""
+    """All commit-ids that the refs under refs/heads point to."""
     heads = Path(wit) / "refs" / "heads"
     return [p.read_text().strip() for p in heads.glob("*") if p.is_file()]
 
 
 def sparse_includes(patterns: list[str], rel: str) -> bool:
-    """Zit ``rel`` in de cone? (Lege cone = alles inbegrepen.)"""
+    """Is ``rel`` in the cone? (Empty cone = everything included.)"""
     if not patterns:
         return True
     for pat in patterns:

@@ -1,12 +1,12 @@
 """Garbage collection: mark -> grace -> sweep (DOEL.md).
 
-Verwijdert objecten die vanuit geen enkele ref bereikbaar zijn. Nooit onmiddellijk: een
-royaal vast grace-venster beschermt net-geschreven objecten tegen de GC<->push-race (een
-multi-GB-push kan lang duren, dus het venster is niet "de push-duur" maar gewoon ruim).
-De index telt óók als root, zodat staged-maar-nog-niet-gecommitte blobs blijven bestaan.
+Removes objects that are not reachable from any ref. Never immediately: a
+generous fixed grace window protects newly written objects against the GC<->push race (a
+multi-GB push can take a long time, so the window isn't "the push duration" but just large).
+The index also counts as a root, so staged-but-not-yet-committed blobs are preserved.
 
-Beleid (DOEL.md): lokale GC is toegestaan; remote-GC op een smart server is later; op een
-dumbe remote staat GC standaard uit. Dit is de lokale variant.
+Policy (DOEL.md): local GC is allowed; remote-GC on a smart server is for later; on a
+dumb remote, GC is off by default. This is the local variant.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from .objects import KINDS, ObjectStore
 from .repo import read_shallow
 from .trees import read_tree
 
-DEFAULT_GRACE_SECONDS = 14 * 24 * 3600  # ~twee weken, vgl. git's gc.pruneExpire
+DEFAULT_GRACE_SECONDS = 14 * 24 * 3600  # ~two weeks, cf. git's gc.pruneExpire
 
 
 @dataclass
@@ -46,7 +46,7 @@ def _mark_tree(store: ObjectStore, tree_oid: str, reachable: set[tuple[str, str]
 
 
 def refs_in(refs_dir: Path) -> list[str]:
-    """De commit-ids waar de heads onder ``refs_dir`` naar wijzen (GC-roots)."""
+    """The commit-ids that the heads under ``refs_dir`` point to (GC-roots)."""
     heads = refs_dir / "heads"
     if not heads.exists():
         return []
@@ -56,11 +56,11 @@ def refs_in(refs_dir: Path) -> list[str]:
 def mark_reachable(
     store: ObjectStore, roots: Iterable[str], boundary: frozenset[str] = frozenset()
 ) -> set[tuple[str, str]]:
-    """Loop de commit-DAG vanaf ``roots`` en verzamel alle bereikbare objecten.
+    """Walk the commit-DAG from ``roots`` and collect all reachable objects.
 
-    Bij een commit in ``boundary`` (retentie-grens) dalen we niet af naar de parents.
-    Werkt op een kale ``ObjectStore`` + roots, dus bruikbaar voor zowel de lokale repo
-    als een remote (smart-server GC).
+    At a commit in ``boundary`` (retention boundary), we don't descend to its parents.
+    Works on a bare ``ObjectStore`` + roots, so usable for both the local repo
+    and a remote (smart-server GC).
     """
     reachable: set[tuple[str, str]] = set()
     stack = list(roots)
@@ -72,7 +72,7 @@ def mark_reachable(
         commit = read_commit(store, cid)
         _mark_tree(store, commit["tree"], reachable)
         if cid not in boundary:
-            # Afwezige parent (retentie hier of op een shallow-gekloonde remote) = grens.
+            # Absent parent (retention here or on a shallow-cloned remote) = boundary.
             stack.extend(p for p in commit["parents"] if store.has("commits", p))
     return reachable
 
@@ -82,7 +82,7 @@ def sweep(
     reachable: set[tuple[str, str]],
     grace_seconds: float = DEFAULT_GRACE_SECONDS,
 ) -> GcReport:
-    """Verwijder onbereikbare objecten ouder dan het grace-venster."""
+    """Remove unreachable objects older than the grace window."""
     report = GcReport()
     now = time.time()
     for kind in KINDS:
@@ -92,7 +92,7 @@ def sweep(
                 continue
             path = store.path_for(kind, oid)
             if now - path.stat().st_mtime < grace_seconds:
-                report.skipped_young += 1  # grace: te jong om te vegen
+                report.skipped_young += 1  # grace: too young to sweep
                 continue
             path.unlink()
             report.removed += 1
@@ -100,9 +100,9 @@ def sweep(
 
 
 def _mark(wit: Path, store: ObjectStore) -> set[tuple[str, str]]:
-    shallow = read_shallow(wit)  # bij een grens dalen we niet af naar de parents
+    shallow = read_shallow(wit)  # at a boundary we don't descend to parents
     reachable = mark_reachable(store, refs_in(wit / "refs"), frozenset(shallow))
-    # roots: de index (staged, nog niet gecommit)
+    # roots: the index (staged, not yet committed)
     with Index(wit) as index:
         for entry in index.entries():
             reachable.add(("blobs", entry.hash))

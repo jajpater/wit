@@ -1,8 +1,8 @@
-"""Commit-objecten en DAG-historie.
+"""Commit objects and DAG history.
 
-Een commit is ``{tree, parents[], time, message, host}`` (DOEL.md). ``parents`` is een
-lijst: merge-commits (>= 2 parents) zijn vanaf het begin toegestaan, dus de historie is
-een DAG. ``log`` loopt die DAG met een visited-set en ordent op tijd.
+A commit is ``{tree, parents[], time, message, host}`` (DOEL.md). ``parents`` is a
+list: merge commits (>= 2 parents) are allowed from the start, so the history is
+a DAG. ``log`` walks this DAG with a visited-set and orders by time.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from .serialize import dumps, loads
 
 
 def now_rfc3339() -> str:
-    # Microsecondenprecisie zodat commits in dezelfde seconde toch verschillen.
+    # Microsecond precision so commits in the same second still differ.
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
@@ -46,12 +46,12 @@ def read_commit(store: ObjectStore, oid: str) -> dict:
 def log(
     store: ObjectStore, head: str | None, shallow: set[str] | None = None
 ) -> list[tuple[str, dict]]:
-    """Loop de commit-DAG vanaf ``head`` in topologische volgorde.
+    """Walk the commit-DAG from ``head`` in topological order.
 
-    Een commit verschijnt altijd vóór zijn parents (kind-vóór-ouder); tussen
-    onafhankelijke takken bepaalt de tijd (nieuwste eerst, id als tiebreak). Zo is de
-    volgorde correct, ook als twee commits exact dezelfde tijd hebben. Bij een
-    ``shallow``-grens wordt niet verder teruggelopen (retentie).
+    A commit always appears before its parents (child-before-parent); between
+    independent branches, time decides (newest first, id as tiebreak). This ensures
+    the order is correct, even if two commits have the exact same time. At a
+    ``shallow`` boundary, it does not walk further back (retention).
     """
     if head is None:
         return []
@@ -65,14 +65,14 @@ def log(
             continue
         commits[cid] = read_commit(store, cid)
         if cid not in boundary:
-            # Een afwezige parent (door retentie geveegd, hier of op een remote vanwaar
-            # we shallow kloonden) is een impliciete grens: niet proberen te lezen.
+            # An absent parent (swept by retention, here or on a remote from which
+            # we shallow cloned) is an implicit boundary: don't try to read it.
             stack.extend(
                 p for p in commits[cid]["parents"] if store.has("commits", p)
             )
 
-    # Aantal kinderen binnen de bereikbare set: een commit is pas 'klaar' als al zijn
-    # kinderen geëmitteerd zijn.
+    # Number of children within the reachable set: a commit is only 'ready' when all its
+    # children have been emitted.
     remaining = {cid: 0 for cid in commits}
     for commit in commits.values():
         for parent in commit["parents"]:

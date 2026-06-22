@@ -1,9 +1,9 @@
-"""De staging-index: een herbouwbare SQLite-cache, geen waarheid.
+"""The staging index: a rebuildable SQLite cache, not the source of truth.
 
-Per ontwerpprincipe (DOEL.md) mag ``.wit/index.sqlite`` volledig verwijderd worden
-zonder dat de repository verloren gaat. De index versnelt `status` (verander-detectie
-op stat) en houdt bij welke bestanden ge-add zijn. ``(device, inode)`` is een puur
-lokale optimalisatie en hoort daarom hier, nooit in een tree/commit-object.
+Per design principle (DOEL.md) ``.wit/index.sqlite`` may be deleted entirely
+without losing the repository. The index accelerates `status` (change detection
+on stat) and keeps track of which files are added. ``(device, inode)`` is a purely
+local optimization and thus belongs here, never in a tree/commit object.
 """
 
 from __future__ import annotations
@@ -69,7 +69,7 @@ class Index:
 
     def put_entry(self, entry: IndexEntry) -> None:
         self.conn.execute(_UPSERT, astuple(entry))
-        # Een pad opnieuw stagen lost zijn eventuele merge-conflict op.
+        # Staging a path again resolves its potential merge conflict.
         self.conn.execute("DELETE FROM conflicts WHERE path = ?", (entry.path,))
 
     def get(self, path: str) -> IndexEntry | None:

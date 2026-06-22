@@ -1,8 +1,8 @@
-"""Tree-objecten: de directorystructuur, opgebouwd uit de index.
+"""Tree objects: the directory structure, built from the index.
 
-Een tree mapt namen naar entries (``type``/``hash``, plus ``mode``/``size`` voor blobs).
-Ongewijzigde subdirectories krijgen dezelfde hash en worden over commits heen hergebruikt
-— de tree/commit-splitsing is dragend voor dedup (DOEL.md).
+A tree maps names to entries (``type``/``hash``, plus ``mode``/``size`` for blobs).
+Unchanged subdirectories get the same hash and are reused across commits
+— the tree/commit split is load-bearing for dedup (DOEL.md).
 """
 
 from __future__ import annotations
@@ -17,10 +17,10 @@ DIR_MODE = 0o040000
 
 
 def build_tree(entries: Iterable[IndexEntry], store: ObjectStore) -> str:
-    """Bouw geneste tree-objecten uit platte index-entries; geef de root-tree-id terug.
+    """Build nested tree objects from flat index entries; return the root tree ID.
 
-    Een opbouw-knooppunt is een ``dict`` waarin een waarde óf een geneste ``dict``
-    (subdirectory) óf een blad-``IndexEntry`` (bestand) is.
+    A build-node is a ``dict`` where a value is either a nested ``dict``
+    (subdirectory) or a leaf ``IndexEntry`` (file).
     """
     root: dict = {}
     for entry in entries:

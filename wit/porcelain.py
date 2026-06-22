@@ -1,8 +1,8 @@
-"""High-level operaties: add, commit, checkout.
+"""High-level operations: add, commit, checkout.
 
-Deze laag bindt object store, index, trees, commits en refs samen tot de commando's
-die de gebruiker kent. De CLI is er een dunne schil omheen; tests gebruiken deze
-functies rechtstreeks (los van cwd/argparse).
+This layer binds object store, index, trees, commits, and refs together into the commands
+that the user knows. The CLI is a thin shell around it; tests use these
+functions directly (independent of cwd/argparse).
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ import os
 from collections.abc import Iterable, Iterator
 from pathlib import Path
 
+from .i18n import _
 from .commits import create_commit, read_commit
 from .gc import DEFAULT_GRACE_SECONDS, GcReport, gc
 from .ignore import load_ignore
@@ -37,10 +38,10 @@ def _entry_for(rel: str, oid: str, st: os.stat_result) -> IndexEntry:
 
 
 def add(wit: Path, store: ObjectStore, targets: Iterable[str]) -> int:
-    """Neem bestanden onder beheer: blob opslaan + index-entry schrijven.
+    """Start tracking files: save blob + write index entry.
 
-    Bij het aflopen van een map worden `.witignore`-patronen toegepast; een expliciet
-    genoemd bestand wordt altijd toegevoegd (vergelijk ``git add -f``).
+    When walking a directory, `.witignore` patterns are applied; an explicitly
+    named file is always added (similar to ``git add -f``).
     """
     root = wit.parent
     ignore = load_ignore(root)
@@ -58,10 +59,10 @@ def add(wit: Path, store: ObjectStore, targets: Iterable[str]) -> int:
 def rm(
     wit: Path, store: ObjectStore, targets: Iterable[str], *, keep_file: bool = False
 ) -> int:
-    """Haal bestanden uit beheer (en verwijder ze, tenzij ``keep_file``).
+    """Stop tracking files (and delete them unless ``keep_file`` is True).
 
-    Een target mag een bestand of een map zijn; bij een map worden alle gevolgde
-    paden eronder verwijderd. De commit erna mist de paden vanzelf (tree uit de index).
+    A target can be a file or a directory; for a directory, all tracked
+    paths beneath it are removed. The next commit will omit these paths naturally.
     """
     root = wit.parent
     count = 0
@@ -81,11 +82,11 @@ def rm(
 
 
 def commit(wit: Path, store: ObjectStore, message: str, **kw: str) -> str:
-    """Leg de staged toestand (de index) vast als commit; geef de commit-id terug."""
+    """Record the staged state (the index) as a commit; return the commit-id."""
     with Index(wit) as index:
         entries = index.entries()
     if not entries:
-        raise ValueError("niets om te committen (index is leeg)")
+        raise ValueError(_("nothing to commit (index is empty)"))
     tree = build_tree(entries, store)
     parents = [head] if (head := read_head(wit)) else []
     commit_id = create_commit(store, tree, parents, message, **kw)
@@ -96,7 +97,7 @@ def commit(wit: Path, store: ObjectStore, message: str, **kw: str) -> str:
 def iter_tree(
     store: ObjectStore, tree_oid: str, prefix: str = ""
 ) -> Iterator[tuple[str, dict]]:
-    """Loop een tree recursief af tot platte (pad, blob-entry)-paren."""
+    """Recursively walk a tree yielding flat (path, blob-entry) tuples."""
     for name, entry in read_tree(store, tree_oid).items():
         rel = f"{prefix}{name}"
         if entry["type"] == "tree":
@@ -106,7 +107,7 @@ def iter_tree(
 
 
 def tree_map(store: ObjectStore, tree_oid: str) -> dict[str, str]:
-    """Platte ``pad -> blob-hash`` van een tree (voor status-vs-HEAD)."""
+    """Flat ``path -> blob-hash`` map of a tree (for status-vs-HEAD)."""
     return {rel: entry["hash"] for rel, entry in iter_tree(store, tree_oid)}
 
 
@@ -117,15 +118,15 @@ def retain(
     *,
     grace_seconds: float = DEFAULT_GRACE_SECONDS,
 ) -> GcReport:
-    """Bewaar per branch de laatste ``keep_n`` commits; ruim de rest op.
+    """Retain the last ``keep_n`` commits per branch; clean up the rest.
 
-    Zet een shallow-grens op de ``keep_n``-de commit (zijn parents gelden daarna als
-    afwezig) en draait dan GC, zodat objecten die uitsluitend bij oudere commits horen
-    worden geveegd. Dit is een *lokale* opruiming; een remote met volledige historie
-    blijft volledig.
+    Sets a shallow boundary at the ``keep_n``-th commit (its parents are considered
+    absent) and then runs GC, so objects belonging exclusively to older commits
+    are swept. This is a *local* cleanup; a remote with full history
+    remains complete.
     """
     if keep_n < 1:
-        raise ValueError("keep_n moet >= 1 zijn")
+        raise ValueError(_("keep_n must be >= 1"))
     boundaries: set[str] = set()
     for head in head_commits(wit):
         cid: str | None = head
@@ -143,12 +144,12 @@ def retain(
 
 
 def checkout(wit: Path, store: ObjectStore, commit_id: str) -> int:
-    """Materialiseer de tree van ``commit_id`` als echte bestanden in de werkdir.
+    """Materialize the tree of ``commit_id`` as real files in the working directory.
 
-    Volledige kopie (geen symlinks); modebits worden hersteld. Respecteert de sparse-cone
-    (`.wit/sparse`): alleen paden in de cone worden uitgecheckt, en eerder uitgecheckte
-    bestanden die nu buiten de cone vallen worden verwijderd. Na afloop wordt de index
-    herbouwd zodat ``status`` schoon is.
+    Full copy (no symlinks); modebits are restored. Respects the sparse cone
+    (`.wit/sparse`): only paths in the cone are checked out, and previously checked out
+    files that now fall outside the cone are removed. Afterwards, the index is
+    rebuilt so ``status`` is clean.
     """
     root = wit.parent
     sparse = read_sparse(wit)
@@ -165,7 +166,7 @@ def checkout(wit: Path, store: ObjectStore, commit_id: str) -> int:
         os.chmod(target, entry["mode"] & 0o7777)
         materialized.append((rel, entry))
 
-    # cone versmald -> eerder uitgecheckte, nu uitgesloten bestanden opruimen
+    # cone narrowed -> clean up previously checked out, now excluded files
     new_paths = {rel for rel, _ in materialized}
     for path in old_paths - new_paths:
         target = root / path

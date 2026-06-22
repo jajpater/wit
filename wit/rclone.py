@@ -1,11 +1,11 @@
-"""DumbRcloneRemote: dezelfde Remote-interface, maar met rclone als transport.
+"""DumbRcloneRemote: same Remote interface, but with rclone as transport.
 
-Past op elk rclone-backend (S3, B2, Drive, SFTP, WebDAV, of een lokaal pad). Omdat de
-objecten onveranderlijke, content-addressed blobs zijn, is rclone's zwakte (geen in-place
-delta, geen rename-detectie) hier irrelevant — er wordt alleen toegevoegd of overgeslagen.
+Fits any rclone backend (S3, B2, Drive, SFTP, WebDAV, or a local path). Because the
+objects are immutable, content-addressed blobs, rclone's weakness (no in-place
+delta, no rename detection) is irrelevant here — it only adds or skips.
 
-Een dumbe remote heeft geen atomaire ref-CAS: de compare-and-swap is best effort
-(lees-dan-schrijf). Veilig voor mirror/backup en single-writer; multi-writer is M6.
+A dumb remote has no atomic ref-CAS: the compare-and-swap is best effort
+(read-then-write). Safe for mirror/backup and single-writer; multi-writer is M6.
 """
 
 from __future__ import annotations
@@ -89,7 +89,7 @@ class DumbRcloneRemote(Remote):
             out.append(f"b3:{ab}{rest}")
         return out
 
-    # -- Bulk-transport (M7): één rclone-call per objecttype i.p.v. per object --
+    # -- Bulk-transport (M7): one rclone call per object kind instead of per object --
     def _bulk_copy(self, src: str, dst: str, rels: list[str]) -> None:
         if not rels:
             return
@@ -97,8 +97,8 @@ class DumbRcloneRemote(Remote):
         try:
             with os.fdopen(fd, "w") as f:
                 f.write("\n".join(rels) + "\n")
-            # rclone copy is idempotent: bestaande objecten worden overgeslagen,
-            # dus geen per-object has()-round-trips nodig.
+            # rclone copy is idempotent: existing objects are skipped,
+            # so no per-object has() round-trips are needed.
             result = self._run(["copy", "--files-from", listfile, src, dst])
             if result.returncode != 0:
                 raise RcloneError(result.stderr.decode())
@@ -129,7 +129,7 @@ class DumbRcloneRemote(Remote):
             self._bulk_copy(
                 self._path("objects", kind), str(store.objects_dir / kind), rels
             )
-        # Bulk-copy gaat buiten ingest om: verifieer de binnengekomen objecten alsnog.
+        # Bulk-copy bypasses ingest: verify the downloaded objects anyway.
         for kind, oid in items:
             store.verify_object(kind, oid)
 

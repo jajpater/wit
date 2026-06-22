@@ -1,17 +1,17 @@
-"""`.witignore`: bepaalt welke bestanden buiten beheer blijven.
+"""`.witignore`: determines which files remain untracked.
 
-Ondersteund: commentaar (``#``), lege regels, glob-patronen (``fnmatch``), mappatronen
-met afsluitende ``/``, en verankering met een leidende ``/``. Een patroon zonder ``/``
-matcht op elk niveau (op een bestands- of mapnaam); een patroon met ``/`` is verankerd
-aan de map waarin het ``.witignore`` staat. (Geen negatie of ``**`` — dat is later.)
+Supported: comments (``#``), empty lines, glob patterns (``fnmatch``), directory patterns
+with trailing ``/``, and anchoring with a leading ``/``. A pattern without ``/``
+matches at any level (on a file or directory name); a pattern with ``/`` is anchored
+to the directory where the ``.witignore`` is located. (No negation or ``**`` — that's for later.)
 
-``.witignore`` is genest: elke map mag er een hebben, en die regels gelden alleen voor de
-subboom eronder (verankerde patronen relatief aan die map). Een `LayeredIgnore` bundelt
-alle gevonden bestanden; bij het matchen telt elke laag waarvan de map een voorouder (of
-de map zelf) van het pad is.
+``.witignore`` is nested: every directory can have one, and those rules only apply to the
+subtree below it (anchored patterns relative to that directory). A `LayeredIgnore` bundles
+all found files; when matching, every layer where the directory is an ancestor (or
+the directory itself) of the path counts.
 
-Net als bij git geldt ignore alleen voor *niet-gevolgde* bestanden: wat al in de index
-staat blijft gevolgd, ook als het later een patroon matcht.
+Just like with git, ignore only applies to *untracked* files: what is already in the index
+remains tracked, even if it later matches a pattern.
 """
 
 from __future__ import annotations
@@ -46,7 +46,7 @@ class IgnoreRules:
                 if not dir_only and fnmatch(rel, pat):
                     return True
                 if dir_only:
-                    # matcht het pad zelf (indien dir) of een voorouder-map
+                    # matches the path itself (if dir) or an ancestor directory
                     bound = len(parts) + (1 if is_dir else 0)
                     if any(fnmatch("/".join(parts[:i]), pat) for i in range(1, bound)):
                         return True
@@ -61,10 +61,10 @@ class IgnoreRules:
 
 
 class LayeredIgnore:
-    """Geneste ``.witignore``-regels: per map een ``IgnoreRules``, gestapeld op prefix."""
+    """Nested ``.witignore`` rules: an ``IgnoreRules`` per directory, stacked by prefix."""
 
     def __init__(self, layers: dict[str, IgnoreRules]) -> None:
-        # prefix "" = repo-root; "sub/dir/" = regels van .witignore in die map
+        # prefix "" = repo root; "sub/dir/" = rules from .witignore in that directory
         self.layers = layers
 
     def match(self, rel: str, is_dir: bool) -> bool:
@@ -73,14 +73,14 @@ class LayeredIgnore:
                 if rules.match(rel, is_dir):
                     return True
             elif rel.startswith(prefix):
-                # match het pad relatief aan de map waarin dit .witignore staat
+                # match the path relative to the directory containing this .witignore
                 if rules.match(rel[len(prefix):], is_dir):
                     return True
         return False
 
 
 def load_ignore(root: Path) -> LayeredIgnore:
-    """Verzamel alle ``.witignore``-bestanden onder ``root`` tot één gelaagde matcher."""
+    """Collect all ``.witignore`` files under ``root`` into a single layered matcher."""
     root = Path(root)
     base = root.resolve()
     layers: dict[str, IgnoreRules] = {}

@@ -1,12 +1,12 @@
 """Content-addressed object store.
 
-Objecten worden geadresseerd op hun BLAKE3-hash en opgeslagen als onveranderlijke,
-hash-genaamde bestanden onder ``objects/<kind>/<ab>/<rest>``. Blobs zijn ruwe bytes
-(``id == b3sum`` van het losse bestand → extern verifieerbaar); trees en commits zijn
-canonieke JSON. Object-id's zijn zelf-beschrijvend: ``b3:<hex>``.
+Objects are addressed by their BLAKE3-hash and stored as immutable,
+hash-named files under ``objects/<kind>/<ab>/<rest>``. Blobs are raw bytes
+(``id == b3sum`` of the loose file -> externally verifiable); trees and commits are
+canonical JSON. Object IDs are self-describing: ``b3:<hex>``.
 
-Schrijven gaat altijd via ``tmp/`` + atomic rename, zodat een afgebroken schrijfactie
-nooit een half object op zijn definitieve plek achterlaat (zie M0-criterium in DOEL.md).
+Writing always goes through ``tmp/`` + atomic rename, so an aborted write
+never leaves a partial object in its final location.
 """
 
 from __future__ import annotations
@@ -18,10 +18,12 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import BinaryIO
 
+from .i18n import _
+
 from blake3 import blake3
 
-#: De objecttypes, elk in een eigen subdir van ``objects/`` (zie DOEL.md: gescheiden
-#: dirs zodat metadata wholesale en blobs selectief getransporteerd kunnen worden).
+#: The object types, each in its own subdir of ``objects/`` (separated
+#: dirs so metadata can be transported wholesale and blobs selectively).
 KINDS = ("blobs", "trees", "commits")
 
 _ALGO = "b3"
@@ -29,12 +31,12 @@ _CHUNK = 1024 * 1024
 
 
 def hash_bytes(data: bytes) -> str:
-    """De zelf-beschrijvende object-id van ``data``."""
+    """The self-describing object-id of ``data``."""
     return f"{_ALGO}:{blake3(data).hexdigest()}"
 
 
 def hash_file(path: Path) -> str:
-    """Streaming-hash van een bestand (geheugen-zuinig voor grote documenten)."""
+    """Streaming hash of a file (memory-efficient for large documents)."""
     hasher = blake3()
     with open(path, "rb") as f:
         while chunk := f.read(_CHUNK):
@@ -45,12 +47,12 @@ def hash_file(path: Path) -> str:
 def _hex(oid: str) -> str:
     algo, sep, hexpart = oid.partition(":")
     if not sep or algo != _ALGO or not hexpart:
-        raise ValueError(f"ongeldige object-id: {oid!r}")
+        raise ValueError(_("invalid object-id: {oid!r}").format(oid=oid))
     return hexpart
 
 
 class ObjectStore:
-    """De waarheid: ``objects/`` + ``refs/``. Alles hieronder is herbouwbaar cache."""
+    """The truth: ``objects/`` + ``refs/``. Everything below this is rebuildable cache."""
 
     def __init__(self, wit_dir: Path) -> None:
         self.wit_dir = Path(wit_dir)
@@ -59,7 +61,7 @@ class ObjectStore:
 
     def _path(self, kind: str, oid: str) -> Path:
         if kind not in KINDS:
-            raise ValueError(f"onbekend objecttype: {kind!r}")
+            raise ValueError(_("unknown object kind: {kind!r}").format(kind=kind))
         h = _hex(oid)
         return self.objects_dir / kind / h[:2] / h[2:]
 
@@ -73,7 +75,7 @@ class ObjectStore:
         return path.read_bytes()
 
     def copy_to(self, kind: str, oid: str, dest: Path) -> None:
-        """Materialiseer een object als echt bestand op ``dest`` (streamend, geen symlink)."""
+        """Materialize an object as a real file at ``dest`` (streaming, no symlink)."""
         src = self._path(kind, oid)
         if not src.exists():
             raise KeyError(oid)
@@ -82,37 +84,37 @@ class ObjectStore:
         shutil.copyfile(src, dest)
 
     def recompute_id(self, kind: str, oid: str) -> str:
-        """Herbereken de id van een opgeslagen object door het te streamen (voor fsck)."""
+        """Recompute the ID of a stored object by streaming it (for fsck)."""
         path = self._path(kind, oid)
         if not path.exists():
             raise KeyError(oid)
         return hash_file(path)
 
     def verify_object(self, kind: str, oid: str) -> None:
-        """Controleer een reeds opgeslagen object; verwijder en raise bij corruptie.
+        """Check a stored object; delete and raise on corruption.
 
-        Voor objecten die buiten ``ingest`` om in de store zijn beland (bulk-download via
-        rclone): herbereken de id en vergelijk; bij een mismatch wordt het corrupte bestand
-        verwijderd zodat de store consistent blijft."""
+        For objects that ended up in the store outside of ``ingest`` (bulk download via
+        rclone): recompute the ID and compare; on mismatch, the corrupt file is
+        deleted so the store remains consistent."""
         actual = self.recompute_id(kind, oid)
         if actual != oid:
             self._path(kind, oid).unlink(missing_ok=True)
             raise ValueError(
-                f"hash-mismatch na download van {kind}: verwacht {oid}, kreeg {actual}"
+                _("hash mismatch after download of {kind}: expected {oid}, got {actual}").format(kind=kind, oid=oid, actual=actual)
             )
 
     def path_for(self, kind: str, oid: str) -> Path:
-        """Het pad van een opgeslagen object (voor transport tussen stores)."""
+        """The path of a stored object (for transport between stores)."""
         return self._path(kind, oid)
 
     def ingest(self, kind: str, oid: str, src: Path, *, verify: bool = True) -> None:
-        """Plaats een bestaand objectbestand (streamende kopie) atomair onder zijn id.
+        """Atomically place an existing object file (streaming copy) under its ID.
 
-        Standaard wordt de inhoud na de kopie en vóór de rename opnieuw gehasht en
-        vergeleken met ``oid`` (verdediging tegen corruptie-in-transit): bij een mismatch
-        wordt het tmp-bestand verwijderd en een ``ValueError`` opgegooid, zodat een corrupt
-        object nooit onder zijn beweerde id in de store verschijnt. ``verify=False`` slaat
-        de pass over (bijv. voor een vertrouwde lokale kopie)."""
+        By default, the content is re-hashed after copying and before the rename
+        and compared against ``oid`` (defense against corruption-in-transit): on mismatch,
+        the tmp file is deleted and a ``ValueError`` is raised, so a corrupt
+        object never appears under its claimed ID. ``verify=False`` skips
+        the pass (e.g., for a trusted local copy)."""
         dest = self._path(kind, oid)
         if dest.exists():
             return
@@ -125,7 +127,7 @@ class ObjectStore:
                 actual = hash_file(Path(tmp))
                 if actual != oid:
                     raise ValueError(
-                        f"hash-mismatch bij ingest van {kind}: verwacht {oid}, kreeg {actual}"
+                        _("hash mismatch during ingest of {kind}: expected {oid}, got {actual}").format(kind=kind, oid=oid, actual=actual)
                     )
             dest.parent.mkdir(parents=True, exist_ok=True)
             os.rename(tmp, dest)
@@ -135,7 +137,7 @@ class ObjectStore:
             raise
 
     def put(self, kind: str, data: bytes) -> str:
-        """Bewaar bytes; geeft de object-id terug. Idempotent (dedup op hash)."""
+        """Save bytes; returns the object ID. Idempotent (dedup on hash)."""
         oid = hash_bytes(data)
         dest = self._path(kind, oid)
         if dest.exists():
@@ -144,7 +146,7 @@ class ObjectStore:
         return oid
 
     def put_file(self, src: Path, kind: str = "blobs") -> str:
-        """Stream een bestand de store in: hash en kopieer in één pass."""
+        """Stream a file into the store: hash and copy in a single pass."""
         self.tmp_dir.mkdir(parents=True, exist_ok=True)
         hasher = blake3()
         fd, tmp = tempfile.mkstemp(dir=self.tmp_dir)
@@ -169,7 +171,7 @@ class ObjectStore:
             raise
 
     def iter_objects(self, kind: str) -> Iterator[str]:
-        """Alle object-id's van een type (voor fsck en GC-reachability)."""
+        """All object IDs of a given kind (for fsck and GC-reachability)."""
         base = self.objects_dir / kind
         if not base.exists():
             return

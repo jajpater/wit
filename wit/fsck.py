@@ -1,8 +1,8 @@
-"""``wit fsck`` — verifieer de integriteit van de object store.
+"""``wit fsck`` — verify the integrity of the object store.
 
-Voor elk object: lees het terug, herbereken de BLAKE3-hash en vergelijk met de id
-waaronder het is opgeslagen. Een mismatch betekent corruptie. Verweesde ``tmp/``-
-bestanden zijn afgebroken schrijfacties en worden (standaard) opgeruimd.
+For each object: read it back, recompute the BLAKE3 hash, and compare it with the ID
+under which it is stored. A mismatch indicates corruption. Stray ``tmp/`` files
+are aborted writes and are cleaned up (by default).
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ def fsck(store: ObjectStore, clean_tmp: bool = True) -> FsckReport:
     for kind in KINDS:
         for oid in store.iter_objects(kind):
             report.checked += 1
-            if store.recompute_id(kind, oid) != oid:  # streamend, geen geheugenpiek
+            if store.recompute_id(kind, oid) != oid:  # streaming, no memory peak
                 report.corrupt.append(oid)
     if store.tmp_dir.exists():
         for stray in store.tmp_dir.iterdir():

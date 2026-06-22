@@ -1,13 +1,13 @@
-"""Remotes: objecttransport en ref-opslag, strikt gescheiden (DOEL.md).
+"""Remotes: object transport and ref storage, strictly separated (DOEL.md).
 
-Een remote doet twee fundamenteel verschillende dingen:
+A remote does two fundamentally different things:
 
-* ``ObjectTransport`` — dom, idempotent kopiëren van onveranderlijke objecten op hash;
-* ``RefStore`` — atomair lezen en compare-and-swappen van een ref.
+* ``ObjectTransport`` — dumb, idempotent copying of immutable objects by hash;
+* ``RefStore`` — atomic reading and compare-and-swapping of a ref.
 
-Een dumbe remote (`FilesystemRemote`, en straks rclone) kan de ref-CAS alleen *best
-effort* (lees-dan-schrijf): veilig voor single-writer/backup, niet voor multi-writer —
-daarvoor komt de `wit-server` in M6.
+A dumb remote (`FilesystemRemote`, and later rclone) can only do the ref-CAS *best
+effort* (read-then-write): safe for single-writer/backup, not for multi-writer —
+for that we will have the `wit-server` in M6.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from .objects import ObjectStore
 
 MAIN_REF = "refs/heads/main"
 
-# De kleine, metadata-objecttypes die bij fetch wholesale opgehaald worden (DOEL.md).
+# The small, metadata object types that are fetched wholesale during fetch (DOEL.md).
 META_KINDS = ("commits", "trees")
 
 
@@ -33,19 +33,19 @@ class ObjectTransport(ABC):
 
     @abstractmethod
     def upload(self, store: ObjectStore, kind: str, oid: str) -> None:
-        """Kopieer een lokaal object naar de remote."""
+        """Copy a local object to the remote."""
 
     @abstractmethod
     def download(self, store: ObjectStore, kind: str, oid: str) -> None:
-        """Kopieer een remote object naar de lokale store."""
+        """Copy a remote object to the local store."""
 
     @abstractmethod
     def list_objects(self, kind: str) -> Iterable[str]:
-        """Alle object-id's van een type op de remote."""
+        """All object IDs of a given kind on the remote."""
 
-    # -- Bulk-transport (M7). Default: per-object lussen (prima voor een lokaal
-    # filesystem). rclone overschrijft dit met één call voor alles, zodat de
-    # per-object-latency van cloud-backends niet de bottleneck wordt. --
+    # -- Bulk-transport (M7). Default: per-object loops (fine for a local
+    # filesystem). rclone overrides this with a single call for everything, so the
+    # per-object latency of cloud backends doesn't become the bottleneck. --
     def upload_objects(
         self, store: ObjectStore, items: Iterable[tuple[str, str]]
     ) -> None:
@@ -61,7 +61,7 @@ class ObjectTransport(ABC):
                 self.download(store, kind, oid)
 
     def fetch_metadata(self, store: ObjectStore) -> None:
-        """Haal alle commit- en tree-objecten op (klein; wholesale)."""
+        """Fetch all commit and tree objects (small; wholesale)."""
         for kind in META_KINDS:
             for oid in self.list_objects(kind):
                 if not store.has(kind, oid):
@@ -76,21 +76,21 @@ class RefStore(ABC):
     def compare_and_swap_ref(
         self, ref: str, expected: str | None, new: str
     ) -> bool:
-        """Zet ``ref`` op ``new`` alleen als hij nu op ``expected`` staat."""
+        """Set ``ref`` to ``new`` only if it is currently at ``expected``."""
 
 
 class Remote(ObjectTransport, RefStore, ABC):
-    """Een remote = objecttransport + ref-opslag."""
+    """A remote = object transport + ref storage."""
 
 
 class FilesystemRemote(Remote):
-    """Een remote die simpelweg een directory op schijf is (eigen objects/ + refs/)."""
+    """A remote that is simply a directory on disk (its own objects/ + refs/)."""
 
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
         self.store = ObjectStore(self.path)
 
-    # -- ObjectTransport (streamende bestandskopie) --
+    # -- ObjectTransport (streaming file copy) --
     def has(self, kind: str, oid: str) -> bool:
         return self.store.has(kind, oid)
 
@@ -128,8 +128,8 @@ class FilesystemRemote(Remote):
     def compare_and_swap_ref(
         self, ref: str, expected: str | None, new: str
     ) -> bool:
-        # Best effort: lees-dan-schrijf zonder lock (zie klassedoc). Veilig voor
-        # single-writer; voor multi-writer is er WitServerRemote (M6).
+        # Best effort: read-then-write without a lock (see class doc). Safe for
+        # single-writer; for multi-writer there is WitServerRemote (M6).
         if self.read_ref(ref) != expected:
             return False
         self._write_ref(ref, new)
@@ -137,13 +137,13 @@ class FilesystemRemote(Remote):
 
 
 class WitServerRemote(FilesystemRemote):
-    """Smart remote: dezelfde opslag, maar een écht atomaire ref-CAS via een lock.
+    """Smart remote: same storage, but a truly atomic ref-CAS via a lock.
 
-    De compare-and-swap leest-vergelijkt-schrijft onder een ``flock``, zodat
-    gelijktijdige pushes serialiseren en er nooit een lost update optreedt — de twee
-    heilige taken van de mini-server (DOEL.md), waarvan dit de eerste is. (De tweede,
-    veilige GC, is later.) Een netwerkdaemon zou exact deze logica omhullen; hier draait
-    de lock op hetzelfde filesystem als de objectopslag.
+    The compare-and-swap reads-compares-writes under an ``flock``, so that
+    concurrent pushes are serialized and a lost update never occurs — the two
+    sacred tasks of the mini-server (DOEL.md), of which this is the first. (The second,
+    safe GC, is later.) A network daemon would wrap exactly this logic; here
+    the lock runs on the same filesystem as the object storage.
     """
 
     def _ref_lock(self, ref: str):
@@ -165,13 +165,13 @@ class WitServerRemote(FilesystemRemote):
                 fcntl.flock(handle, fcntl.LOCK_UN)
 
     def gc(self, grace_seconds: float | None = None):
-        """De tweede heilige servertaak: veilige GC op de remote zelf.
+        """The second sacred server task: safe GC on the remote itself.
 
-        Mark vanaf de remote-refs en sweep de remote-objecten, alles onder dezelfde
-        ``flock`` als de ref-CAS op ``main``. Zo kan er tijdens de GC geen push de ref
-        verzetten; objecten van een nog-niet-afgeronde push zijn jong en vallen binnen het
-        grace-venster, dus ze worden niet geveegd (geen GC<->push-race). Dumbe remotes
-        bieden dit bewust niet aan (DOEL.md)."""
+        Mark from the remote refs and sweep the remote objects, all under the same
+        ``flock`` as the ref-CAS on ``main``. This way no push can move the ref
+        during the GC; objects from a not-yet-completed push are young and fall within the
+        grace window, so they aren't swept (no GC<->push race). Dumb remotes
+        intentionally do not offer this (DOEL.md)."""
         from .gc import DEFAULT_GRACE_SECONDS, mark_reachable, refs_in, sweep
 
         grace = DEFAULT_GRACE_SECONDS if grace_seconds is None else grace_seconds
@@ -186,11 +186,11 @@ class WitServerRemote(FilesystemRemote):
 
 
 def make_remote(spec: str) -> Remote:
-    """Bouw een remote uit een spec:
+    """Build a remote from a spec:
 
-    * ``rclone:<backend>`` -> DumbRcloneRemote (bv. ``rclone:b2:bucket/repo``)
-    * ``server:<pad>``     -> WitServerRemote (atomaire ref-CAS)
-    * ``fs:<pad>`` of een kaal pad -> FilesystemRemote
+    * ``rclone:<backend>`` -> DumbRcloneRemote (e.g. ``rclone:b2:bucket/repo``)
+    * ``server:<path>``    -> WitServerRemote (atomic ref-CAS)
+    * ``fs:<path>`` or bare path -> FilesystemRemote
     """
     if spec.startswith("rclone:"):
         from .rclone import DumbRcloneRemote

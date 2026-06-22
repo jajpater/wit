@@ -1,6 +1,6 @@
-"""wit — een git voor documenten.
+"""wit — a git for documents.
 
-M0: de content-addressed object store + fsck. Zie DOEL.md voor de architectuur.
+M0: the content-addressed object store + fsck. See ARCHITECTURE.md for details.
 """
 
 __version__ = "0.0.0"

@@ -1,7 +1,7 @@
-"""Canonieke serialisatie voor tree- en commit-objecten.
+"""Canonical serialization for tree and commit objects.
 
-Content-addressing vereist een byte-stabiele representatie: gesorteerde keys, geen
-overbodige witruimte, UTF-8. Zo geeft dezelfde inhoud op elke machine dezelfde hash.
+Content-addressing requires a byte-stable representation: sorted keys, no
+redundant whitespace, UTF-8. This way, the same content yields the same hash on every machine.
 """
 
 from __future__ import annotations
