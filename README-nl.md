@@ -176,6 +176,8 @@ wit serve --port 8137 --host 0.0.0.0
 ```
 
 Open de URL in je browser: blader door commits, mappen en bestanden, en download bestanden.
+Tekst, Markdown, afbeeldingen en PDF's worden **inline** getoond (een `README.md` in de
+hoofdmap wordt gerenderd op de repo-pagina), en de interface volgt je systeemthema (licht/donker).
 De webinterface is **alleen-lezen** (geen schrijfacties), precies om veilig te kunnen delen.
 
 ---

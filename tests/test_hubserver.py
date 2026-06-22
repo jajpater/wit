@@ -65,6 +65,26 @@ def test_make_remote_builds_http_remote(hub_url):
     assert isinstance(make_remote(hub_url), HttpRemote)
 
 
+def test_repo_list_and_view_after_push(tmp_path, hub_url):
+    import urllib.request
+    src = tmp_path / "src"
+    src.mkdir()
+    wit, store, _head, _files = _seed(src)  # a.txt, sub/img.bin, sub/leeg.dat
+    sync.push(wit, store, make_remote(hub_url))
+
+    root = hub_url.rsplit("/", 2)[0]  # strip /alice/library
+    # the repo card shows the public badge and a file count
+    listing = urllib.request.urlopen(f"{root}/").read().decode()
+    assert "alice/library" in listing
+    assert "public" in listing
+    assert "3 files" in listing
+    # the inline view page renders for a text file
+    view = urllib.request.urlopen(
+        f"{root}/alice/library/view/HEAD/a.txt").read().decode()
+    assert "<!doctype html>" in view
+    assert "hallo" in view
+
+
 def test_push_then_clone_is_byte_identical(tmp_path, hub_url):
     src = tmp_path / "src"
     src.mkdir()

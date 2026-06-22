@@ -20,30 +20,65 @@ from __future__ import annotations
 import html
 import json
 import mimetypes
+import tomllib
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import web, wire
+from . import porcelain, web, wire
 from .access import AccessPolicy, Principal
+from .commits import read_commit
 from .hub import Hub, RepoRef
 from .i18n import _
 from .objects import KINDS
+from .refs import read_head
 
 _CHUNK = 1024 * 1024
 
 
-def render_repo_list(repos: list[RepoRef]) -> bytes:
-    items = []
+def _repo_meta(hub: Hub, ref: RepoRef) -> dict:
+    """Description + last commit + file count for the repo overview card."""
+    description = ""
+    meta = ref.path / "repo.toml"
+    if meta.exists():
+        try:
+            description = tomllib.loads(meta.read_text()).get("description", "")
+        except (OSError, tomllib.TOMLDecodeError):
+            pass
+    info = {"description": description, "short": None, "date": None, "files": 0}
+    store = hub.store_for(ref)
+    head = read_head(ref.path)
+    if head is not None:
+        commit = read_commit(store, head)
+        info["short"] = head[3:11]
+        info["date"] = commit["time"][:10]
+        info["files"] = sum(1 for _ in porcelain.iter_tree(store, commit["tree"]))
+    return info
+
+
+def render_repo_list(hub: Hub, repos: list[RepoRef]) -> bytes:
+    cards = []
     for ref in repos:
         slug = html.escape(ref.slug)
-        vis = html.escape(ref.visibility)
-        items.append(
-            f'<li><a href="/{slug}/">{slug}</a> '
-            f'<span class="meta">{vis}</span></li>'
+        m = _repo_meta(hub, ref)
+        desc = (f'<p class=muted>{html.escape(m["description"])}</p>'
+                if m["description"] else "")
+        if m["short"]:
+            stat = (f'{m["files"]} files · <span class=hash>{html.escape(m["short"])}'
+                    f'</span> · {html.escape(m["date"])}')
+        else:
+            stat = _("empty")
+        cards.append(
+            f'<div class="card repo"><h3><a href="/{slug}/">{slug}</a> '
+            f'{web.badge(ref.visibility)}</h3>{desc}'
+            f'<p class=muted>{stat}</p></div>'
         )
-    body = f"<h2>{_('repositories')}</h2><ul>{''.join(items) or '—'}</ul>"
-    return web._page("wit hub", body)
+    body = (
+        f"<h1>{_('repositories')} "
+        f'<span class=muted style="font-weight:400">({len(repos)})</span></h1>'
+        f"{''.join(cards) or '<p class=muted>—</p>'}"
+    )
+    return web._page("wit hub", body, home="/")
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -145,7 +180,7 @@ class _Handler(BaseHTTPRequestHandler):
             principal = self._principal()
             visible = [r for r in self._hub.list()
                        if self._policy.can_read(principal, r)]
-            self._send_html(render_repo_list(visible))
+            self._send_html(render_repo_list(self._hub, visible))
             return
         resolved = self._resolve(parts)
         if resolved is None:
@@ -199,12 +234,17 @@ class _Handler(BaseHTTPRequestHandler):
         store = self._hub.store_for(ref)
         base = f"/{ref.owner}/{ref.name}"
         if not rest:
-            self._send_html(web.render_index(store, ref.path, base))
+            self._send_html(web.render_index(store, ref.path, base, heading=ref.slug))
         elif rest[0] == "commit" and len(rest) == 2:
             self._send_html(web.render_commit(store, rest[1], base))
         elif rest[0] == "tree" and len(rest) >= 2:
             commit = web.resolve_commit(ref.path, rest[1]) or rest[1]
             page = web.render_tree(store, commit, "/".join(rest[2:]), base)
+            self._send_html(page or web._page("404", "not found"),
+                            200 if page else 404)
+        elif rest[0] == "view" and len(rest) >= 3:
+            commit = web.resolve_commit(ref.path, rest[1]) or rest[1]
+            page = web.render_blob_view(store, commit, "/".join(rest[2:]), base)
             self._send_html(page or web._page("404", "not found"),
                             200 if page else 404)
         elif rest[0] == "blob" and len(rest) >= 3:

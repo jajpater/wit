@@ -9,7 +9,15 @@ from wit import porcelain
 from wit.objects import ObjectStore
 from wit.refs import read_head
 from wit.repo import init
-from wit.web import blob_entry, make_server, render_tree, tree_listing
+from wit.web import (
+    blob_entry,
+    humansize,
+    make_server,
+    render_blob_view,
+    render_markdown,
+    render_tree,
+    tree_listing,
+)
 
 
 def _setup(tmp_path):
@@ -41,6 +49,51 @@ def test_render_tree_contains_links(tmp_path):
     page = render_tree(store, read_head(wit), "").decode()
     assert "calvijn.md" in page
     assert "/tree/" in page and "scans/" in page
+    assert "/view/" in page  # files link to the preview page now
+
+
+def test_humansize():
+    assert humansize(0) == "0 B"
+    assert humansize(500) == "500 B"
+    assert humansize(1536) == "1.5 KB"
+    assert humansize(5 * 1024 * 1024) == "5.0 MB"
+
+
+def test_render_markdown_subset():
+    out = render_markdown("# Titel\n\nGewoon **vet** en `code`.\n- een\n- twee\n")
+    assert "<h1>Titel</h1>" in out
+    assert "<strong>vet</strong>" in out
+    assert "<code>code</code>" in out
+    assert out.count("<li>") == 2
+    # no script injection: raw html is escaped
+    assert "<script>" not in render_markdown("<script>alert(1)</script>")
+
+
+def test_render_blob_view_text_and_missing(tmp_path):
+    _, wit, store, _ = _setup(tmp_path)
+    head = read_head(wit)
+    page = render_blob_view(store, head, "calvijn.md").decode()
+    assert "Calvijn over het verbond." in page   # markdown rendered inline
+    assert "download" in page.lower()
+    assert render_blob_view(store, head, "weg.txt") is None  # 404 upstream
+
+
+def test_live_server_view_and_blob_distinct(tmp_path):
+    root, wit, store, blob = _setup(tmp_path)
+    server = make_server(wit, host="127.0.0.1", port=0)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        base = f"http://127.0.0.1:{server.server_address[1]}"
+        # /view renders an HTML preview page (not the raw bytes)
+        view = urllib.request.urlopen(f"{base}/view/HEAD/calvijn.md").read()
+        assert b"<!doctype html>" in view and b"Calvijn" in view
+        # /blob still returns the raw bytes
+        raw = urllib.request.urlopen(f"{base}/blob/HEAD/scans/doc.bin").read()
+        assert raw == blob
+    finally:
+        server.shutdown()
+        thread.join()
 
 
 def test_live_server_serves_byte_identical_blob(tmp_path):
