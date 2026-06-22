@@ -125,13 +125,17 @@ wit sparse set                # leeg = weer alles
 Een **remote** is een tweede kopie van de repository — een andere map, een schijf, of een
 cloud-backend via [rclone](https://rclone.org/).
 
-### Remote-vormen
+### Soorten remotes (slim vs. dom)
 
-| Spec | Betekenis |
-|---|---|
-| `/pad/naar/remote` of `fs:/pad` | een gewone map (lokaal of op een gemounte schijf) |
-| `server:/pad` | zelfde map, maar met **veilige** ref-updates (flock) voor meerdere schrijvers |
-| `rclone:b2:bucket/repo` | elk rclone-backend (S3, B2, Drive, SFTP, WebDAV, …) |
+Net als bij git maken we onderscheid tussen **domme** en **slimme** remotes:
+- **Domme remotes** slaan alleen bestanden op. Dit is prima voor back-ups of als je er in je eentje aan werkt, maar minder veilig als twee mensen tegelijk wijzigingen sturen.
+- **Slimme remotes** snappen wat een 'push' is en voorkomen actief dat gegevens door elkaar raken als meerdere mensen tegelijkertijd wijzigingen sturen.
+
+| Spec | Soort | Betekenis |
+|---|---|---|
+| `/pad/naar/remote` of `fs:/pad` | Dom | Een gewone map (lokaal of op een gemounte schijf). |
+| `server:/pad` | Slim | Zelfde map, maar veilig om te gebruiken als meerdere mensen er tegelijk naar pushen. |
+| `rclone:b2:bucket/repo` | Dom | Elk rclone-backend (S3, B2, Drive, SFTP, WebDAV, …). |
 
 ### Push, clone, pull
 
@@ -147,8 +151,8 @@ cd bibliotheek
 wit pull
 ```
 
-Na een eerste `push` of `clone` onthoudt `wit` de remote, zodat je daarna `wit push` /
-`wit pull` zonder pad kunt typen.
+**Hoe maak je een remote aan?**
+Niet! Je hoeft een remote niet vooraf te initialiseren. Zodra je voor het eerst pusht naar een pad (lokaal, op een server of via rclone), maakt `wit` daar automatisch de benodigde opslagstructuur aan. Na een eerste `push` of `clone` onthoudt `wit` de remote, zodat je daarna simpelweg `wit push` / `wit pull` zonder pad kunt typen.
 
 `push` is crash-veilig: eerst worden alle objecten geüpload, en pas als laatste stap
 verspringt de branch-pointer. Een afgebroken push laat hooguit wat ongebruikte objecten
