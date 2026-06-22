@@ -77,17 +77,17 @@ def _page(title: str, body: str) -> bytes:
     ).encode("utf-8")
 
 
-def _breadcrumbs(commit_id: str, subpath: str) -> str:
+def _breadcrumbs(commit_id: str, subpath: str, base: str = "") -> str:
     parts = [c for c in subpath.split("/") if c]
-    crumbs = [f'<a href="/tree/{html.escape(commit_id)}/">/</a>']
+    crumbs = [f'<a href="{base}/tree/{html.escape(commit_id)}/">/</a>']
     acc = ""
     for part in parts:
         acc = f"{acc}{part}/"
-        crumbs.append(f'<a href="/tree/{html.escape(commit_id)}/{html.escape(acc)}">{html.escape(part)}</a>')
+        crumbs.append(f'<a href="{base}/tree/{html.escape(commit_id)}/{html.escape(acc)}">{html.escape(part)}</a>')
     return " ".join(crumbs)
 
 
-def render_index(store: ObjectStore, wit: Path) -> bytes:
+def render_index(store: ObjectStore, wit: Path, base: str = "") -> bytes:
     head = read_head(wit)
     if head is None:
         return _page("wit", f"<p>{_('no commits yet')}</p>")
@@ -97,17 +97,19 @@ def render_index(store: ObjectStore, wit: Path) -> bytes:
         msg = html.escape(commit["message"])
         when = html.escape(commit["time"])
         rows.append(
-            f'<li><a href="/commit/{html.escape(cid)}">{short}</a> '
+            f'<li><a href="{base}/commit/{html.escape(cid)}">{short}</a> '
             f'{msg} <span class="meta">{when}</span></li>'
         )
     body = (
-        f'<p><a href="/tree/HEAD/">📂 {_("browse HEAD")}</a></p>'
+        f'<p><a href="{base}/tree/HEAD/">📂 {_("browse HEAD")}</a></p>'
         f"<h2>{_('commits')}</h2><ul>{''.join(rows)}</ul>"
     )
     return _page("wit", body)
 
 
-def render_tree(store: ObjectStore, commit_id: str, subpath: str) -> bytes | None:
+def render_tree(
+    store: ObjectStore, commit_id: str, subpath: str, base: str = ""
+) -> bytes | None:
     listing = tree_listing(store, commit_id, subpath)
     if listing is None:
         return None
@@ -116,33 +118,33 @@ def render_tree(store: ObjectStore, commit_id: str, subpath: str) -> bytes | Non
         href_path = f"{subpath}/{name}" if subpath else name
         if entry["type"] == "tree":
             items.append(
-                f'<li class="dir"><a href="/tree/{html.escape(commit_id)}/'
+                f'<li class="dir"><a href="{base}/tree/{html.escape(commit_id)}/'
                 f'{html.escape(href_path)}">{html.escape(name)}/</a></li>'
             )
         else:
             size = entry.get("size", 0)
             items.append(
-                f'<li><a href="/blob/{html.escape(commit_id)}/'
+                f'<li><a href="{base}/blob/{html.escape(commit_id)}/'
                 f'{html.escape(href_path)}">{html.escape(name)}</a> '
                 f'<span class="meta">{size} bytes</span></li>'
             )
     body = (
-        f"<p>{_breadcrumbs(commit_id, subpath)}</p><ul>{''.join(items)}</ul>"
+        f"<p>{_breadcrumbs(commit_id, subpath, base)}</p><ul>{''.join(items)}</ul>"
     )
     return _page(f"tree {subpath}", body)
 
 
-def render_commit(store: ObjectStore, commit_id: str) -> bytes:
+def render_commit(store: ObjectStore, commit_id: str, base: str = "") -> bytes:
     commit = read_commit(store, commit_id)
     parents = " ".join(
-        f'<a href="/commit/{html.escape(p)}">{html.escape(p[3:11])}</a>'
+        f'<a href="{base}/commit/{html.escape(p)}">{html.escape(p[3:11])}</a>'
         for p in commit["parents"]
     )
     body = (
         f'<p class="meta">{html.escape(commit["time"])} · {html.escape(commit["host"])}</p>'
         f"<p>{html.escape(commit['message'])}</p>"
         f"<p>parents: {parents or '—'}</p>"
-        f'<p><a href="/tree/{html.escape(commit_id)}/">📂 {_("browse this commit")}</a></p>'
+        f'<p><a href="{base}/tree/{html.escape(commit_id)}/">📂 {_("browse this commit")}</a></p>'
     )
     return _page(f"commit {commit_id[3:11]}", body)
 
