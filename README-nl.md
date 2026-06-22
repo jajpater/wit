@@ -330,6 +330,7 @@ wit cat-object blobs b3:…     # schrijf de ruwe bytes van een object naar stdo
 | `wit-hub create <owner>/<name> [--public]` | repository hosten |
 | `wit-hub rm <owner>/<name>` | gehoste repository verwijderen |
 | `wit-hub list` | gehoste repository's tonen |
+| `wit-hub visibility <owner>/<name> public\|private` | zichtbaarheid wijzigen |
 | `wit-hub token add <owner>` | toegangstoken aanmaken |
 | `wit-hub token list` | tokens tonen |
 | `wit-hub serve [--host --port]` | hub-HTTP-server starten |

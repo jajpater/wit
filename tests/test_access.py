@@ -93,3 +93,12 @@ def test_cli_rm(tmp_path):
     hubcli.main(["--root", root, "create", "alice/library"])
     assert hubcli.main(["--root", root, "rm", "alice/library"]) == 0
     assert Hub(tmp_path / "srv").resolve("alice", "library") is None
+
+
+def test_cli_visibility(tmp_path):
+    root = str(tmp_path / "srv")
+    hubcli.main(["--root", root, "init"])
+    hubcli.main(["--root", root, "create", "alice/library"])  # private
+    assert hubcli.main(
+        ["--root", root, "visibility", "alice/library", "public"]) == 0
+    assert Hub(tmp_path / "srv").resolve("alice", "library").visibility == "public"

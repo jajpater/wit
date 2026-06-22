@@ -68,6 +68,17 @@ def cmd_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_visibility(args: argparse.Namespace) -> int:
+    owner, name = _split_slug(args.slug)
+    try:
+        ref = Hub(_root(args)).set_visibility(owner, name, args.visibility)
+    except (FileNotFoundError, ValueError) as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    print(_("{slug} is now {vis}").format(slug=ref.slug, vis=ref.visibility))
+    return 0
+
+
 def cmd_token(args: argparse.Namespace) -> int:
     root = _root(args)
     if args.token_action == "add":
@@ -137,6 +148,11 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("list", help="list hosted repositories")
     p.set_defaults(func=cmd_list)
+
+    p = sub.add_parser("visibility", help="set a repo's visibility (owner/name)")
+    p.add_argument("slug")
+    p.add_argument("visibility", choices=("public", "private"))
+    p.set_defaults(func=cmd_visibility)
 
     p = sub.add_parser("token", help="manage access tokens")
     tsub = p.add_subparsers(dest="token_action", required=True)

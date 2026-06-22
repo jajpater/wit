@@ -265,6 +265,15 @@ wit-hub token add anderegebruiker
 wit-hub token list
 ```
 
+**Zichtbaarheid wijzigen** (bijv. een private repo publiek maken zodat je 'm in de
+browser kunt bladeren):
+
+```bash
+wit-hub visibility jajpater/scans public      # of: private
+```
+
+Dit wordt direct van kracht — geen herstart nodig.
+
 **Retentie / opruimen** (per repo of alles):
 
 ```bash
@@ -308,6 +317,7 @@ systemctl restart wit-hub
 | `wit-hub init` | lege hub aanmaken op `$WIT_HUB_ROOT` |
 | `wit-hub create <owner>/<naam> [--public]` | repository hosten |
 | `wit-hub list` | gehoste repo's tonen |
+| `wit-hub visibility <owner>/<naam> public\|private` | zichtbaarheid wijzigen |
 | `wit-hub rm <owner>/<naam>` | repository verwijderen |
 | `wit-hub token add <owner>` | toegangstoken aanmaken |
 | `wit-hub token list` | tokens tonen |

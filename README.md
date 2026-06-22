@@ -321,6 +321,7 @@ wit cat-object blobs b3:…     # write the raw bytes of an object to stdout
 | `wit-hub create <owner>/<name> [--public]` | host a repository |
 | `wit-hub rm <owner>/<name>` | delete a hosted repository |
 | `wit-hub list` | list hosted repositories |
+| `wit-hub visibility <owner>/<name> public\|private` | change visibility |
 | `wit-hub token add <owner>` | create an access token |
 | `wit-hub token list` | list tokens |
 | `wit-hub serve [--host --port]` | start the hub HTTP server |

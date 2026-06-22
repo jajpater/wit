@@ -48,6 +48,21 @@ def test_duplicate_is_rejected(tmp_path):
         hub.create("alice", "library")
 
 
+def test_set_visibility(tmp_path):
+    hub = Hub.init(tmp_path / "srv")
+    hub.create("alice", "library")  # private by default
+    assert hub.resolve("alice", "library").visibility == "private"
+
+    ref = hub.set_visibility("alice", "library", "public")
+    assert ref.visibility == "public"
+    assert hub.resolve("alice", "library").visibility == "public"  # persisted
+
+    with pytest.raises(ValueError):
+        hub.set_visibility("alice", "library", "secret")
+    with pytest.raises(FileNotFoundError):
+        hub.set_visibility("alice", "nope", "public")
+
+
 @pytest.mark.parametrize("owner,name", [
     ("..", "x"), ("a/b", "x"), ("alice", ".."), ("", "x"), (".hidden", "x"),
 ])

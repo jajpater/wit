@@ -97,12 +97,7 @@ class Hub:
             raise FileExistsError(_("{slug} already exists").format(
                 slug=f"{owner}/{name}"))
         repo.init_at(path)
-        (path / "repo.toml").write_text(
-            f'owner = "{owner}"\n'
-            f'name = "{name}"\n'
-            f'visibility = "{visibility}"\n'
-            'description = ""\n'
-        )
+        self._write_meta(path, owner, name, visibility, "")
         return RepoRef(owner, name, path, visibility)
 
     def delete(self, owner: str, name: str) -> None:
@@ -113,6 +108,35 @@ class Hub:
             raise FileNotFoundError(_("no such repo: {slug}").format(
                 slug=f"{owner}/{name}"))
         shutil.rmtree(path)
+
+    def set_visibility(self, owner: str, name: str, visibility: str) -> RepoRef:
+        """Change a hosted repo's visibility (``public``/``private``)."""
+        if visibility not in VISIBILITIES:
+            raise ValueError(_("invalid visibility: {v}").format(v=visibility))
+        path = self._repo_path(owner, name)
+        if not path.is_dir():
+            raise FileNotFoundError(_("no such repo: {slug}").format(
+                slug=f"{owner}/{name}"))
+        meta = path / "repo.toml"
+        description = ""
+        if meta.exists():
+            try:
+                description = tomllib.loads(meta.read_text()).get("description", "")
+            except (OSError, tomllib.TOMLDecodeError):
+                pass
+        self._write_meta(path, owner, name, visibility, description)
+        return RepoRef(owner, name, path, visibility)
+
+    @staticmethod
+    def _write_meta(
+        path: Path, owner: str, name: str, visibility: str, description: str
+    ) -> None:
+        (path / "repo.toml").write_text(
+            f'owner = "{owner}"\n'
+            f'name = "{name}"\n'
+            f'visibility = "{visibility}"\n'
+            f'description = "{description}"\n'
+        )
 
     # -- registry (scan-based; registry.sqlite cache is a TODO) -----------
 
