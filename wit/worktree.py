@@ -25,6 +25,11 @@ def walk_files(
     An explicitly specified file is always yielded. During the traversal of a
     directory, if ``root`` and ``ignore`` are given, ignored directories are pruned and
     ignored files are skipped.
+
+    Symlinks are skipped (not followed and not tracked): wit stores real file bytes
+    and restores a working dir as real files, so a symlink has no representation.
+    A dangling symlink — e.g. an editor lock file like ``.#foo.org`` — would
+    otherwise crash ``add`` when its (non-existent) target is opened.
     """
     base = Path(base)
     if base.is_file():
@@ -40,12 +45,17 @@ def walk_files(
         for d in sorted(dirnames):
             if d == WIT_DIR:
                 continue
-            if ignored(Path(dirpath) / d, True):
+            full = Path(dirpath) / d
+            if full.is_symlink():  # don't descend into or track symlinked dirs
+                continue
+            if ignored(full, True):
                 continue
             keep.append(d)
         dirnames[:] = keep
         for name in sorted(filenames):
             path = Path(dirpath) / name
+            if path.is_symlink():  # skip symlinks (incl. dangling editor locks)
+                continue
             if not ignored(path, False):
                 yield path
 
