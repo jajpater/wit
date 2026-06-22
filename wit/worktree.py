@@ -7,6 +7,7 @@ Paths are normalized as relative POSIX paths w.r.t. the repository root.
 from __future__ import annotations
 
 import os
+import stat
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -26,10 +27,10 @@ def walk_files(
     directory, if ``root`` and ``ignore`` are given, ignored directories are pruned and
     ignored files are skipped.
 
-    Symlinks are skipped (not followed and not tracked): wit stores real file bytes
-    and restores a working dir as real files, so a symlink has no representation.
-    A dangling symlink — e.g. an editor lock file like ``.#foo.org`` — would
-    otherwise crash ``add`` when its (non-existent) target is opened.
+    Only **regular files** are yielded. Symlinks, FIFOs, sockets and device files
+    are skipped: wit stores real file bytes and restores a working dir as real files,
+    so they have no representation — and opening them could crash ``add`` (a dangling
+    symlink like an editor lock ``.#foo.org``) or block it forever (a FIFO).
     """
     base = Path(base)
     if base.is_file():
@@ -54,8 +55,12 @@ def walk_files(
         dirnames[:] = keep
         for name in sorted(filenames):
             path = Path(dirpath) / name
-            if path.is_symlink():  # skip symlinks (incl. dangling editor locks)
-                continue
+            try:
+                st = path.lstat()
+            except OSError:
+                continue  # vanished mid-walk
+            if not stat.S_ISREG(st.st_mode):
+                continue  # skip symlinks, FIFOs, sockets, device files
             if not ignored(path, False):
                 yield path
 

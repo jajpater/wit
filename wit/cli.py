@@ -69,7 +69,18 @@ def cmd_cat_object(args: argparse.Namespace) -> int:
 
 def cmd_add(args: argparse.Namespace) -> int:
     wit = find_wit()
-    added = porcelain.add(wit, ObjectStore(wit), args.paths)
+    tty = sys.stderr.isatty()
+
+    def progress(count: int, rel: str) -> None:
+        # Throttled, in-place, only on a terminal — keeps a big `add` from looking
+        # frozen without spamming non-interactive output (logs, pipes).
+        if tty and count % 100 == 0:
+            print(f"\r  {count} files…", end="", file=sys.stderr, flush=True)
+
+    added = porcelain.add(
+        wit, ObjectStore(wit), args.paths, progress=progress)
+    if tty:
+        print("\r\033[K", end="", file=sys.stderr)  # clear the progress line
     print(_("{count} file(s) added").format(count=added))
     return 0
 

@@ -8,7 +8,7 @@ functions directly (independent of cwd/argparse).
 from __future__ import annotations
 
 import os
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 
 from .i18n import _
@@ -37,11 +37,20 @@ def _entry_for(rel: str, oid: str, st: os.stat_result) -> IndexEntry:
     )
 
 
-def add(wit: Path, store: ObjectStore, targets: Iterable[str]) -> int:
+def add(
+    wit: Path,
+    store: ObjectStore,
+    targets: Iterable[str],
+    *,
+    progress: Callable[[int, str], None] | None = None,
+) -> int:
     """Start tracking files: save blob + write index entry.
 
     When walking a directory, `.witignore` patterns are applied; an explicitly
     named file is always added (similar to ``git add -f``).
+
+    ``progress``, if given, is called with ``(count, rel)`` after each file is
+    stored — for a CLI to report progress on a large directory.
     """
     root = wit.parent
     ignore = load_ignore(root)
@@ -57,6 +66,8 @@ def add(wit: Path, store: ObjectStore, targets: Iterable[str]) -> int:
                     continue  # vanished between the walk and the read; skip it
                 index.put_entry(entry)
                 count += 1
+                if progress is not None:
+                    progress(count, rel)
     return count
 
 
