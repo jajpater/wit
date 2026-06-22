@@ -2,11 +2,9 @@
 
 `wit` manages **files** (pdf, docx, jpg, tif, … everything) like git manages source code:
 one central repository, content-addressed storage, push/pull/clone/checkout. The big
-difference with git-annex and Git LFS: **your working directory always contains real files, never
-symlinks**. You open, annotate, search, and back them up like regular files; you will never notice the internal
-object store.
+difference with git-annex and Git LFS: **your working directory always contains real files, never symlinks**. You open, annotate, search, and back them up like regular files; you will never notice the internal object store.
 
-The complete design is in [DOEL.md](DOEL.md). This is the practical manual.
+The complete design is in [ARCHITECTURE.md](ARCHITECTURE.md). This is the practical manual.
 
 ---
 
