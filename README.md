@@ -172,6 +172,71 @@ The web interface is **read-only** (no write actions), exactly to be able to sha
 
 ---
 
+## Hosting many repositories (`wit-hub`)
+
+A single `wit` repository is to `wit` what one git repository is to git. A **hub**
+is the layer on top that hosts *many* repositories under one service — the way
+GitHub hosts many git repositories. It adds nothing to the repository format: each
+hosted repo is an ordinary `wit` repository, plus a registry, an HTTP router, and an
+access policy. The full design is in [ARCHITECTURE-hub.md](ARCHITECTURE-hub.md).
+
+### Setting up a hub
+
+```bash
+wit-hub --root /srv/wit init                 # lay out an empty hub
+wit-hub --root /srv/wit create alice/library --public   # a hosted repo (owner/name)
+wit-hub --root /srv/wit create alice/notes              # private (the default)
+wit-hub --root /srv/wit list                 # show hosted repos
+wit-hub --root /srv/wit serve --host 0.0.0.0 --port 8080
+```
+
+`--root` may be omitted if you set `$WIT_HUB_ROOT`. `serve` falls back to the `host`
+and `port` from the hub's `hub.toml`.
+
+### Using a hosted repo
+
+From any machine, a hub URL works as a remote — `clone`, `push`, `pull` as usual:
+
+```bash
+wit clone http://hub.example:8080/alice/library lib
+cd lib
+# … edit, add, commit …
+wit push                       # remembers the hub URL after the first push/clone
+```
+
+### Access: tokens
+
+By default a hub runs in **token** mode: `public` repositories can be read and cloned
+by anyone, but reading a `private` repo and **every push** require a token whose owner
+matches the repo's owner.
+
+```bash
+wit-hub --root /srv/wit token add alice      # prints a fresh token for owner "alice"
+```
+
+Clients pass it through the environment:
+
+```bash
+export WIT_TOKEN=<the-token>
+wit push http://hub.example:8080/alice/library
+```
+
+Set `auth_mode = "open"` in `hub.toml` to disable built-in auth entirely — appropriate
+on a trusted LAN, or when a reverse proxy in front of the hub handles authentication.
+
+### Browsing and maintenance
+
+`serve` also exposes the same read-only web viewer as `wit serve`, now per repo:
+`http://hub.example:8080/` lists the repositories a viewer may see, and
+`/<owner>/<name>/` browses one. Retention runs per repo:
+
+```bash
+wit-hub --root /srv/wit gc alice/library     # one repo
+wit-hub --root /srv/wit gc                    # all repos
+```
+
+---
+
 ## Cleaning up versions (retention)
 
 `wit` is not a full version control system, but it does remember your history. Do you only want to keep the last
@@ -247,6 +312,20 @@ wit cat-object blobs b3:…     # write the raw bytes of an object to stdout
 | `wit serve` | start web interface |
 | `wit gc [--keep N]` | clean up / retention |
 | `wit fsck` | check integrity |
+
+### Hub (`wit-hub`)
+
+| Command | Purpose |
+|---|---|
+| `wit-hub init` | new hub at `--root` |
+| `wit-hub create <owner>/<name> [--public]` | host a repository |
+| `wit-hub rm <owner>/<name>` | delete a hosted repository |
+| `wit-hub list` | list hosted repositories |
+| `wit-hub visibility <owner>/<name> public\|private` | change visibility |
+| `wit-hub token add <owner>` | create an access token |
+| `wit-hub token list` | list tokens |
+| `wit-hub serve [--host --port]` | start the hub HTTP server |
+| `wit-hub gc [<owner>/<name>]` | retention (one repo or all) |
 
 ---
 

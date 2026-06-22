@@ -10,6 +10,7 @@ dev = ["pytest>=7"]
 
 [project.scripts]
 wit = "wit.cli:main"
+wit-hub = "wit.hubcli:main"
 
 [build-system]
 requires = ["setuptools>=68"]
