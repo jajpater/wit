@@ -50,8 +50,12 @@ def add(wit: Path, store: ObjectStore, targets: Iterable[str]) -> int:
         for raw in targets:
             for path in walk_files(Path(raw).resolve(), root=root, ignore=ignore):
                 rel = rel_path(path, root)
-                oid = store.put_file(path, kind="blobs")
-                index.put_entry(_entry_for(rel, oid, path.stat()))
+                try:
+                    oid = store.put_file(path, kind="blobs")
+                    entry = _entry_for(rel, oid, path.stat())
+                except FileNotFoundError:
+                    continue  # vanished between the walk and the read; skip it
+                index.put_entry(entry)
                 count += 1
     return count
 
