@@ -74,6 +74,7 @@ class Hub:
         if not config.exists():
             config.write_text(
                 'default_visibility = "private"\n'
+                'auth_mode = "token"\n'
                 'host = "127.0.0.1"\n'
                 "port = 8080\n"
             )

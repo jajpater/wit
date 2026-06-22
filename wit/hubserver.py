@@ -25,6 +25,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from . import web
+from .access import AccessPolicy, Principal
 from .hub import Hub, RepoRef
 from .i18n import _
 from .objects import KINDS
@@ -32,9 +33,9 @@ from .objects import KINDS
 _CHUNK = 1024 * 1024
 
 
-def render_repo_list(hub: Hub) -> bytes:
+def render_repo_list(repos: list[RepoRef]) -> bytes:
     items = []
-    for ref in hub.list():
+    for ref in repos:
         slug = html.escape(ref.slug)
         vis = html.escape(ref.visibility)
         items.append(
@@ -53,12 +54,21 @@ class _Handler(BaseHTTPRequestHandler):
     def _hub(self) -> Hub:
         return self.server.hub  # type: ignore[attr-defined]
 
+    @property
+    def _policy(self) -> AccessPolicy:
+        return self.server.policy  # type: ignore[attr-defined]
+
     # -- helpers ----------------------------------------------------------
 
     def _parts(self) -> tuple[list[str], dict]:
         parsed = urllib.parse.urlparse(self.path)
         parts = [urllib.parse.unquote(p) for p in parsed.path.split("/") if p]
         return parts, urllib.parse.parse_qs(parsed.query)
+
+    def _principal(self) -> Principal | None:
+        auth = self.headers.get("Authorization", "")
+        token = auth[7:].strip() if auth.startswith("Bearer ") else None
+        return self._policy.principal_for(token)
 
     def _resolve(self, parts: list[str]) -> tuple[RepoRef, list[str]] | None:
         """Resolve ``/<owner>/<name>/...`` to (repo, rest) or send 404."""
@@ -70,6 +80,22 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_text("not found", 404)
             return None
         return ref, parts[2:]
+
+    def _authorize(self, ref: RepoRef, *, write: bool) -> bool:
+        """Enforce the access policy; send the right error and return False on deny.
+
+        Reads on a forbidden repo answer 404 (don't leak private repo existence);
+        writes answer 401 (no token) or 403 (token without rights)."""
+        principal = self._principal()
+        if write:
+            if self._policy.can_write(principal, ref):
+                return True
+            self._send_text("unauthorized", 401 if principal is None else 403)
+            return False
+        if self._policy.can_read(principal, ref):
+            return True
+        self._send_text("not found", 404)
+        return False
 
     def _send_text(self, text: str, code: int = 200) -> None:
         body = text.encode("utf-8")
@@ -92,12 +118,17 @@ class _Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         parts, query = self._parts()
         if not parts:
-            self._send_html(render_repo_list(self._hub))
+            principal = self._principal()
+            visible = [r for r in self._hub.list()
+                       if self._policy.can_read(principal, r)]
+            self._send_html(render_repo_list(visible))
             return
         resolved = self._resolve(parts)
         if resolved is None:
             return
         ref, rest = resolved
+        if not self._authorize(ref, write=False):
+            return
         try:
             if rest and rest[0] == "objects":
                 self._get_object(ref, rest)
@@ -183,6 +214,8 @@ class _Handler(BaseHTTPRequestHandler):
         if resolved is None:
             return
         ref, rest = resolved
+        if not self._authorize(ref, write=False):
+            return
         if len(rest) == 3 and rest[0] == "objects":
             store = self._hub.store_for(ref)
             ok = rest[1] in KINDS and store.has(rest[1], rest[2])
@@ -198,6 +231,8 @@ class _Handler(BaseHTTPRequestHandler):
         if resolved is None:
             return
         ref, rest = resolved
+        if not self._authorize(ref, write=True):
+            return
         if len(rest) != 3 or rest[0] != "objects" or rest[1] not in KINDS:
             self._send_text("bad request", 400)
             return
@@ -220,6 +255,8 @@ class _Handler(BaseHTTPRequestHandler):
         if resolved is None:
             return
         ref, rest = resolved
+        if not self._authorize(ref, write=True):
+            return
         if not rest or rest[0] != "refs":
             self._send_text("bad request", 400)
             return
@@ -245,6 +282,7 @@ def make_server(
 ) -> ThreadingHTTPServer:
     server = ThreadingHTTPServer((host, port), _Handler)
     server.hub = Hub(root)  # type: ignore[attr-defined]
+    server.policy = AccessPolicy.load(root)  # type: ignore[attr-defined]
     return server
 
 

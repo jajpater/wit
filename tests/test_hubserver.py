@@ -10,6 +10,7 @@ import threading
 import pytest
 
 from wit import porcelain, sync
+from wit.access import add_token
 from wit.hub import Hub
 from wit.hubserver import make_server
 from wit.objects import ObjectStore
@@ -20,16 +21,23 @@ from wit.repo import init
 _T = "2026-01-01T00:00:00.000000Z"
 
 
-@pytest.fixture
-def hub_url(tmp_path):
-    """A running hub with one empty repo ``alice/library``; yields its URL."""
-    Hub.init(tmp_path / "srv").create("alice", "library", visibility="public")
-    server = make_server(tmp_path / "srv", host="127.0.0.1", port=0)
+def _start(root):
+    server = make_server(root, host="127.0.0.1", port=0)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     host, port = server.server_address
+    return server, thread, f"http://{host}:{port}"
+
+
+@pytest.fixture
+def hub_url(tmp_path, monkeypatch):
+    """A running hub with public ``alice/library`` and an alice token in env."""
+    hub = Hub.init(tmp_path / "srv")
+    hub.create("alice", "library", visibility="public")
+    monkeypatch.setenv("WIT_TOKEN", add_token(tmp_path / "srv", "alice"))
+    server, thread, base = _start(tmp_path / "srv")
     try:
-        yield f"http://{host}:{port}/alice/library"
+        yield f"{base}/alice/library"
     finally:
         server.shutdown()
         thread.join()
@@ -115,3 +123,55 @@ def test_push_is_rejected_when_remote_moved(tmp_path, hub_url):
     porcelain.commit(b, bstore, "from b", time=_T)
     with pytest.raises(ValueError):
         sync.push(b, bstore, make_remote(hub_url))
+
+
+# -- access policy --------------------------------------------------------
+
+import urllib.error
+import urllib.request
+
+
+def test_push_without_token_is_unauthorized(tmp_path, monkeypatch):
+    hub = Hub.init(tmp_path / "srv")
+    hub.create("alice", "library", visibility="public")
+    server, thread, base = _start(tmp_path / "srv")
+    monkeypatch.delenv("WIT_TOKEN", raising=False)
+    try:
+        src = tmp_path / "src"
+        src.mkdir()
+        wit, store, _h, _f = _seed(src)
+        # anonymous push to a public repo must be refused (401)
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            sync.push(wit, store, make_remote(f"{base}/alice/library"))
+        assert exc.value.code == 401
+    finally:
+        server.shutdown()
+        thread.join()
+
+
+def test_private_repo_is_hidden_and_unreadable_anonymously(tmp_path, monkeypatch):
+    hub = Hub.init(tmp_path / "srv")
+    hub.create("alice", "secret", visibility="private")
+    token = add_token(tmp_path / "srv", "alice")
+    server, thread, base = _start(tmp_path / "srv")
+    monkeypatch.delenv("WIT_TOKEN", raising=False)
+    try:
+        # not listed for anonymous viewers
+        listing = urllib.request.urlopen(f"{base}/").read().decode()
+        assert "alice/secret" not in listing
+        # reading the ref anonymously -> 404 (existence not leaked)
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            urllib.request.urlopen(f"{base}/alice/secret/refs/heads/main")
+        assert exc.value.code == 404
+
+        # with the owner token it is reachable: push then clone round-trips
+        monkeypatch.setenv("WIT_TOKEN", token)
+        src = tmp_path / "src"
+        src.mkdir()
+        wit, store, head, _f = _seed(src)
+        sync.push(wit, store, make_remote(f"{base}/alice/secret"))
+        cloned = sync.clone(make_remote(f"{base}/alice/secret"), tmp_path / "c")
+        assert read_head(cloned) == head
+    finally:
+        server.shutdown()
+        thread.join()

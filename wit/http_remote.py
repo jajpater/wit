@@ -19,6 +19,7 @@ loop from ``ObjectTransport``; a batched request is a later optimization (M7).
 from __future__ import annotations
 
 import json
+import os
 import urllib.error
 import urllib.request
 from collections.abc import Iterable
@@ -28,10 +29,15 @@ from .remote import Remote
 
 
 class HttpRemote(Remote):
-    """A repository hosted by a hub, addressed as ``https://host/owner/name``."""
+    """A repository hosted by a hub, addressed as ``https://host/owner/name``.
 
-    def __init__(self, base_url: str) -> None:
+    A bearer token (for private repos and pushes) is read from ``$WIT_TOKEN`` and
+    sent as ``Authorization: Bearer …``; public-read access needs no token.
+    """
+
+    def __init__(self, base_url: str, token: str | None = None) -> None:
         self.base_url = base_url.rstrip("/")
+        self.token = token if token is not None else os.environ.get("WIT_TOKEN")
 
     def _object_url(self, kind: str, oid: str) -> str:
         return f"{self.base_url}/objects/{kind}/{oid}"
@@ -40,6 +46,8 @@ class HttpRemote(Remote):
         req = urllib.request.Request(url, data=data, method=method)
         if data is not None:
             req.add_header("Content-Type", "application/octet-stream")
+        if self.token:
+            req.add_header("Authorization", f"Bearer {self.token}")
         return urllib.request.urlopen(req)
 
     # -- ObjectTransport --------------------------------------------------
@@ -95,5 +103,7 @@ class HttpRemote(Remote):
         req = urllib.request.Request(
             f"{self.base_url}/{ref}", data=body, method="POST")
         req.add_header("Content-Type", "application/json")
+        if self.token:
+            req.add_header("Authorization", f"Bearer {self.token}")
         with urllib.request.urlopen(req) as resp:
             return bool(json.loads(resp.read()).get("ok"))
