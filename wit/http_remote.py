@@ -25,7 +25,8 @@ import urllib.request
 from collections.abc import Iterable
 
 from .objects import ObjectStore
-from .remote import Remote
+from .remote import META_KINDS, Remote
+from .wire import frame_header, frame_size, read_frames
 
 
 class HttpRemote(Remote):
@@ -71,18 +72,72 @@ class HttpRemote(Remote):
             data = resp.read()
         # store.put re-hashes; a corrupted transfer lands under a different id,
         # so verify the server returned the bytes we asked for.
-        stored = store.put(kind, data)
-        if stored != oid:
-            store._path(kind, stored).unlink(missing_ok=True)
-            raise ValueError(
-                f"hash mismatch after download of {kind}: "
-                f"expected {oid}, got {stored}"
-            )
+        self._store_frame(store, kind, oid, data)
 
     def list_objects(self, kind: str) -> Iterable[str]:
         with self._request("GET", f"{self.base_url}/objects/{kind}/") as resp:
             text = resp.read().decode("utf-8")
         return [line for line in text.splitlines() if line]
+
+    # -- bulk transport (one request per direction; see wire.py) ----------
+
+    def _store_frame(self, store: ObjectStore, kind: str, oid: str, data: bytes) -> None:
+        stored = store.put(kind, data)  # re-hashes -> verifies in transit
+        if stored != oid:
+            store._path(kind, stored).unlink(missing_ok=True)
+            raise ValueError(
+                f"hash mismatch after download of {kind}: "
+                f"expected {oid}, got {stored}")
+
+    def upload_objects(
+        self, store: ObjectStore, items: Iterable[tuple[str, str]]
+    ) -> None:
+        items = list(items)
+        if not items:
+            return
+        sizes = [store.path_for(k, o).stat().st_size for k, o in items]
+        total = sum(frame_size(k, o, sz) for (k, o), sz in zip(items, sizes))
+
+        def body():
+            for (kind, oid), sz in zip(items, sizes):
+                yield frame_header(kind, oid, sz)
+                with open(store.path_for(kind, oid), "rb") as f:
+                    while chunk := f.read(1024 * 1024):
+                        yield chunk
+
+        req = urllib.request.Request(
+            f"{self.base_url}/objects", data=body(), method="POST")
+        req.add_header("Content-Type", "application/octet-stream")
+        req.add_header("Content-Length", str(total))
+        if self.token:
+            req.add_header("Authorization", f"Bearer {self.token}")
+        with urllib.request.urlopen(req):
+            pass
+
+    def download_objects(
+        self, store: ObjectStore, items: Iterable[tuple[str, str]]
+    ) -> None:
+        want = [[k, o] for k, o in items if not store.has(k, o)]
+        if not want:
+            return
+        body = json.dumps(want).encode("utf-8")
+        req = urllib.request.Request(
+            f"{self.base_url}/fetch", data=body, method="POST")
+        req.add_header("Content-Type", "application/json")
+        if self.token:
+            req.add_header("Authorization", f"Bearer {self.token}")
+        with urllib.request.urlopen(req) as resp:
+            for kind, oid, data in read_frames(resp):
+                self._store_frame(store, kind, oid, data)
+
+    def fetch_metadata(self, store: ObjectStore) -> None:
+        wanted = [
+            (kind, oid)
+            for kind in META_KINDS
+            for oid in self.list_objects(kind)
+            if not store.has(kind, oid)
+        ]
+        self.download_objects(store, wanted)
 
     # -- RefStore ---------------------------------------------------------
 

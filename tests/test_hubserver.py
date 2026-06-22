@@ -80,6 +80,27 @@ def test_push_then_clone_is_byte_identical(tmp_path, hub_url):
         assert (dest / rel).read_bytes() == data
 
 
+def test_bulk_transport_many_objects(tmp_path, hub_url):
+    # many small files in nested dirs -> many trees+blobs in one batched push/fetch
+    src = tmp_path / "src"
+    for i in range(50):
+        p = src / f"d{i % 7}" / f"f{i}.txt"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(f"content-{i}\n".encode())
+    wit = init(src)
+    store = ObjectStore(wit)
+    porcelain.add(wit, store, [str(src)])
+    head = porcelain.commit(wit, store, "many", time=_T)
+
+    sync.push(wit, store, make_remote(hub_url))
+    dest = tmp_path / "clone"
+    cloned = sync.clone(make_remote(hub_url), dest)
+    assert read_head(cloned) == head
+    for i in range(50):
+        assert (dest / f"d{i % 7}" / f"f{i}.txt").read_bytes() == \
+            f"content-{i}\n".encode()
+
+
 def test_pull_fast_forwards_a_new_commit(tmp_path, hub_url):
     # producer pushes an initial commit
     src = tmp_path / "src"

@@ -177,3 +177,20 @@ cd lib && wit push          # CAS via the hub, blobs via http or rclone hybrid
 So the `wit` core remains the "git", and the hub is the thin "GitHub" around it: a
 registry + router + policy, without changing a single byte of the content-addressed
 truth.
+
+## Implementation status
+
+| Part | Module | Status |
+|------|--------|--------|
+| Repo lifecycle + registry | `hub.py` | done (registry is a live directory scan) |
+| HTTP router + viewer | `hubserver.py`, `web.py` (`base`) | done |
+| Object transport client | `http_remote.py` | done |
+| Batched transport (M7) | `wire.py` + `objects`/`fetch` routes | done (one request per direction; bounded memory) |
+| Access policy (token / open) | `access.py` | done |
+| `wit-hub` CLI | `hubcli.py` | done (`init`/`create`/`rm`/`list`/`token`/`serve`/`gc`) |
+| `registry.sqlite` cache | — | TODO (scan suffices until repo counts grow) |
+| Token scopes / multi-owner / SSH | — | TODO (single owner-per-repo today) |
+
+The batched protocol is deliberately simple: a stream of `"<kind> <oid> <length>\n"`
++ raw-bytes records (see `wire.py`), one request to upload all missing objects and one
+to fetch them, instead of a round-trip per object.

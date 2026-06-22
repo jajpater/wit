@@ -24,7 +24,7 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import web
+from . import web, wire
 from .access import AccessPolicy, Principal
 from .hub import Hub, RepoRef
 from .i18n import _
@@ -95,6 +95,30 @@ class _Handler(BaseHTTPRequestHandler):
         if self._policy.can_read(principal, ref):
             return True
         self._send_text("not found", 404)
+        return False
+
+    def _drain(self) -> None:
+        """Discard the request body, so a rejected upload still gets its response
+        (closing mid-stream would give the client a broken pipe, not the error)."""
+        remaining = int(self.headers.get("Content-Length", 0))
+        while remaining > 0:
+            chunk = self.rfile.read(min(remaining, _CHUNK))
+            if not chunk:
+                break
+            remaining -= len(chunk)
+
+    def _authorize_body(self, ref: RepoRef, *, write: bool) -> bool:
+        """Like ``_authorize`` but for body-carrying requests: drain first on deny."""
+        principal = self._principal()
+        ok = (self._policy.can_write if write
+              else self._policy.can_read)(principal, ref)
+        if ok:
+            return True
+        self._drain()
+        if write:
+            self._send_text("unauthorized", 401 if principal is None else 403)
+        else:
+            self._send_text("not found", 404)
         return False
 
     def _send_text(self, text: str, code: int = 200) -> None:
@@ -231,7 +255,7 @@ class _Handler(BaseHTTPRequestHandler):
         if resolved is None:
             return
         ref, rest = resolved
-        if not self._authorize(ref, write=True):
+        if not self._authorize_body(ref, write=True):
             return
         if len(rest) != 3 or rest[0] != "objects" or rest[1] not in KINDS:
             self._send_text("bad request", 400)
@@ -247,7 +271,7 @@ class _Handler(BaseHTTPRequestHandler):
             return
         self._send_text("", 201)
 
-    # -- POST: ref compare-and-swap --------------------------------------
+    # -- POST: ref CAS, batch upload, batch download ----------------------
 
     def do_POST(self) -> None:
         parts, _q = self._parts()
@@ -255,19 +279,27 @@ class _Handler(BaseHTTPRequestHandler):
         if resolved is None:
             return
         ref, rest = resolved
-        if not self._authorize(ref, write=True):
-            return
-        if not rest or rest[0] != "refs":
+        head = rest[0] if rest else ""
+        if head == "fetch":  # batch download is a read
+            if self._authorize_body(ref, write=False):
+                self._batch_download(ref)
+        elif head == "objects":  # batch upload
+            if self._authorize_body(ref, write=True):
+                self._batch_upload(ref)
+        elif head == "refs":
+            if self._authorize_body(ref, write=True):
+                self._cas_ref(ref, rest)
+        else:
             self._send_text("bad request", 400)
-            return
+
+    def _cas_ref(self, ref: RepoRef, rest: list[str]) -> None:
         length = int(self.headers.get("Content-Length", 0))
         try:
             payload = json.loads(self.rfile.read(length))
         except (ValueError, json.JSONDecodeError):
             self._send_text("bad request", 400)
             return
-        remote = self._hub.remote_for(ref)
-        ok = remote.compare_and_swap_ref(
+        ok = self._hub.remote_for(ref).compare_and_swap_ref(
             "/".join(rest), payload.get("expected"), payload["new"])
         body = json.dumps({"ok": bool(ok)}).encode("utf-8")
         self.send_response(200)
@@ -275,6 +307,42 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def _batch_upload(self, ref: RepoRef) -> None:
+        store = self._hub.store_for(ref)
+        length = int(self.headers.get("Content-Length", 0))
+        for kind, oid, data in wire.read_frames(self.rfile, length):
+            if kind not in KINDS:
+                self._send_text("bad request", 400)
+                return
+            stored = store.put(kind, data)  # re-hashes -> verifies in transit
+            if stored != oid:
+                store._path(kind, stored).unlink(missing_ok=True)
+                self._send_text("hash mismatch", 400)
+                return
+        self._send_text("", 201)
+
+    def _batch_download(self, ref: RepoRef) -> None:
+        store = self._hub.store_for(ref)
+        length = int(self.headers.get("Content-Length", 0))
+        try:
+            want = json.loads(self.rfile.read(length))
+        except (ValueError, json.JSONDecodeError):
+            self._send_text("bad request", 400)
+            return
+        present = [
+            (kind, oid, store.path_for(kind, oid).stat().st_size)
+            for kind, oid in want
+            if kind in KINDS and store.has(kind, oid)
+        ]
+        total = sum(wire.frame_size(k, o, sz) for k, o, sz in present)
+        self.send_response(200)
+        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("Content-Length", str(total))
+        self.end_headers()
+        for kind, oid, sz in present:
+            wire.stream_object(
+                self.wfile, store.path_for(kind, oid), kind, oid, sz)
 
 
 def make_server(

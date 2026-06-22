@@ -180,6 +180,71 @@ De webinterface is **alleen-lezen** (geen schrijfacties), precies om veilig te k
 
 ---
 
+## Veel repository's hosten (`wit-hub`)
+
+Eén `wit`-repository is voor `wit` wat één git-repository is voor git. Een **hub**
+is de laag eromheen die *veel* repository's onder één service host — zoals GitHub veel
+git-repository's host. Het voegt niets toe aan het repository-formaat: elke gehoste
+repo is een gewone `wit`-repository, plus een register, een HTTP-router en een
+toegangsbeleid. Het volledige ontwerp staat in [ARCHITECTURE-hub.md](ARCHITECTURE-hub.md).
+
+### Een hub opzetten
+
+```bash
+wit-hub --root /srv/wit init                 # lege hub aanmaken
+wit-hub --root /srv/wit create alice/library --public   # gehoste repo (owner/name)
+wit-hub --root /srv/wit create alice/notes              # privé (de standaard)
+wit-hub --root /srv/wit list                 # toon gehoste repo's
+wit-hub --root /srv/wit serve --host 0.0.0.0 --port 8080
+```
+
+`--root` mag je weglaten als je `$WIT_HUB_ROOT` zet. `serve` valt terug op de `host`
+en `port` uit het `hub.toml` van de hub.
+
+### Een gehoste repo gebruiken
+
+Vanaf elke machine werkt een hub-URL als remote — `clone`, `push`, `pull` zoals gewoonlijk:
+
+```bash
+wit clone http://hub.example:8080/alice/library lib
+cd lib
+# … bewerken, add, commit …
+wit push                       # onthoudt de hub-URL na de eerste push/clone
+```
+
+### Toegang: tokens
+
+Standaard draait een hub in **token**-modus: `public`-repository's kan iedereen lezen
+en clonen, maar het lezen van een `private`-repo en **elke push** vereisen een token
+waarvan de owner overeenkomt met de owner van de repo.
+
+```bash
+wit-hub --root /srv/wit token add alice      # print een vers token voor owner "alice"
+```
+
+Clients geven het mee via de omgeving:
+
+```bash
+export WIT_TOKEN=<het-token>
+wit push http://hub.example:8080/alice/library
+```
+
+Zet `auth_mode = "open"` in `hub.toml` om de ingebouwde auth helemaal uit te zetten —
+geschikt op een vertrouwd LAN, of als een reverse proxy vóór de hub de authenticatie doet.
+
+### Bladeren en onderhoud
+
+`serve` biedt ook dezelfde alleen-lezen webviewer als `wit serve`, nu per repo:
+`http://hub.example:8080/` toont de repository's die een bezoeker mag zien, en
+`/<owner>/<name>/` bladert er één. Retentie draait per repo:
+
+```bash
+wit-hub --root /srv/wit gc alice/library     # één repo
+wit-hub --root /srv/wit gc                    # alle repo's
+```
+
+---
+
 ## Versies opruimen (retentie)
 
 `wit` is geen volledig versiebeheer, maar onthoudt wel je historie. Wil je alleen de laatste
@@ -256,6 +321,19 @@ wit cat-object blobs b3:…     # schrijf de ruwe bytes van een object naar stdo
 | `wit serve` | webinterface starten |
 | `wit gc [--keep N]` | opruimen / retentie |
 | `wit fsck` | integriteit controleren |
+
+### Hub (`wit-hub`)
+
+| Commando | Doel |
+|---|---|
+| `wit-hub init` | nieuwe hub op `--root` |
+| `wit-hub create <owner>/<name> [--public]` | repository hosten |
+| `wit-hub rm <owner>/<name>` | gehoste repository verwijderen |
+| `wit-hub list` | gehoste repository's tonen |
+| `wit-hub token add <owner>` | toegangstoken aanmaken |
+| `wit-hub token list` | tokens tonen |
+| `wit-hub serve [--host --port]` | hub-HTTP-server starten |
+| `wit-hub gc [<owner>/<name>]` | retentie (één repo of alle) |
 
 ---
 
