@@ -21,16 +21,29 @@ _LAYOUT = (
 _CONFIG = 'object_format_version = 1\nhash = "blake3"\n'
 
 
+def init_at(wit: Path) -> Path:
+    """Lay out an empty repository *directly* at ``wit`` and return it.
+
+    This is the bare layout (``objects/``, ``refs/``, ``HEAD``, ``config.toml``)
+    without a surrounding ``.wit`` directory — used for remotes and hub-hosted
+    repositories, where ``wit`` is itself the repository directory.
+    """
+    wit = Path(wit)
+    if wit.exists() and any(wit.iterdir()):
+        raise FileExistsError(_("{wit} already exists").format(wit=wit))
+    for sub in _LAYOUT:
+        (wit / sub).mkdir(parents=True, exist_ok=True)
+    (wit / "HEAD").write_text("ref: refs/heads/main\n")
+    (wit / "config.toml").write_text(_CONFIG)
+    return wit
+
+
 def init(root: Path) -> Path:
     """Create an empty repository under ``root`` and return the ``.wit`` path."""
     wit = Path(root) / WIT_DIR
     if wit.exists():
         raise FileExistsError(_("{wit} already exists").format(wit=wit))
-    for sub in _LAYOUT:
-        (wit / sub).mkdir(parents=True)
-    (wit / "HEAD").write_text("ref: refs/heads/main\n")
-    (wit / "config.toml").write_text(_CONFIG)
-    return wit
+    return init_at(wit)
 
 
 def find_wit(start: Path | None = None) -> Path:

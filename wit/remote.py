@@ -188,10 +188,15 @@ class WitServerRemote(FilesystemRemote):
 def make_remote(spec: str) -> Remote:
     """Build a remote from a spec:
 
+    * ``http(s)://host/owner/name`` -> HttpRemote (hub-hosted, see ARCHITECTURE-hub.md)
     * ``rclone:<backend>`` -> DumbRcloneRemote (e.g. ``rclone:b2:bucket/repo``)
     * ``server:<path>``    -> WitServerRemote (atomic ref-CAS)
     * ``fs:<path>`` or bare path -> FilesystemRemote
     """
+    if spec.startswith(("http://", "https://")):
+        from .http_remote import HttpRemote
+
+        return HttpRemote(spec)
     if spec.startswith("rclone:"):
         from .rclone import DumbRcloneRemote
 
