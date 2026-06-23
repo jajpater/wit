@@ -168,7 +168,9 @@ wit serve --port 8137 --host 0.0.0.0
 ```
 
 Open the URL in your browser: browse through commits, directories, and files, and download files.
-The web interface is **read-only** (no write actions), exactly to be able to share safely.
+Text, Markdown, images and PDFs are shown **inline** (a root `README.md` is rendered on the
+repo page), and the interface follows your system's light/dark theme. The web interface is
+**read-only** (no write actions), exactly to be able to share safely.
 
 ---
 
