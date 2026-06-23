@@ -7,6 +7,9 @@ Two route families under ``/<owner>/<name>/`` (see ARCHITECTURE-hub.md):
   ``refs/heads/<branch>`` (GET read, POST compare-and-swap).
 * **Viewer** (read-only): ``/`` lists repos; ``/<owner>/<name>/`` reuses the
   single-repo render functions from ``web.py`` with a per-repo URL ``base``.
+* **Lifecycle**: ``PUT /<owner>/<name>`` creates a repo (idempotent), gated by the
+  same ``can_write`` check as a push — this is what auto-create-on-push and
+  ``wit-hub create <url>`` drive.
 
 The transport endpoints delegate to the repo's ``WitServerRemote``, so the ref
 compare-and-swap still runs under its ``flock`` — atomicity stays in one place.
@@ -290,7 +293,10 @@ class _Handler(BaseHTTPRequestHandler):
     # -- PUT: object upload ----------------------------------------------
 
     def do_PUT(self) -> None:
-        parts, _q = self._parts()
+        parts, query = self._parts()
+        if len(parts) == 2:  # PUT /<owner>/<name> -> create the repo
+            self._create_repo(parts[0], parts[1], query)
+            return
         resolved = self._resolve(parts)
         if resolved is None:
             return
@@ -310,6 +316,31 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_text("hash mismatch", 400)
             return
         self._send_text("", 201)
+
+    def _create_repo(self, owner: str, name: str, query: dict) -> None:
+        """Create a hosted repo in the owner's namespace (idempotent).
+
+        Authorizing against a synthetic ``RepoRef`` means a missing repo answers
+        the same 401/403 as an existing one a stranger may not touch — existence
+        is never leaked. ``FileExistsError`` (caller already passed can_write) is
+        a benign re-create, so it reports 200 instead of an error."""
+        self._drain()  # a PUT may carry a body; consume it before replying
+        visibility = ("public" if query.get("visibility", [""])[0] == "public"
+                      else "private")
+        synthetic = RepoRef(
+            owner, name, self._hub._repo_path(owner, name), visibility)
+        principal = self._principal()
+        if not self._policy.can_write(principal, synthetic):
+            self._send_text("unauthorized", 401 if principal is None else 403)
+            return
+        try:
+            self._hub.create(owner, name, visibility)
+        except FileExistsError:
+            self._send_text("exists", 200)
+        except ValueError:
+            self._send_text("invalid owner/name", 400)
+        else:
+            self._send_text("created", 201)
 
     # -- POST: ref CAS, batch upload, batch download ----------------------
 

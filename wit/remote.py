@@ -82,6 +82,13 @@ class RefStore(ABC):
 class Remote(ObjectTransport, RefStore, ABC):
     """A remote = object transport + ref storage."""
 
+    def prepare_push(self) -> None:
+        """Hook run before a push uploads its objects.
+
+        Dumb remotes materialize their storage implicitly on the first write, so
+        the default is a no-op. The hub remote overrides this to auto-create the
+        hosted repository on first push (see ARCHITECTURE-hub.md)."""
+
 
 class FilesystemRemote(Remote):
     """A remote that is simply a directory on disk (its own objects/ + refs/)."""

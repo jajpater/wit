@@ -206,6 +206,30 @@ cd lib
 wit push                       # remembers the hub URL after the first push/clone
 ```
 
+### Creating a repo remotely
+
+You no longer have to be on the server to make a repo. With a token for your
+owner namespace (see below), pushing to a URL that does not exist yet **creates
+it automatically** — private by default, just like a dumb remote materializes its
+storage on first push:
+
+```bash
+export WIT_TOKEN=<your-token>
+wit push http://hub.example:8080/alice/new-project    # repo created, then pushed
+```
+
+To choose visibility (or a description) up front, create it explicitly first:
+
+```bash
+wit-hub create http://hub.example:8080/alice/new-project --public
+wit push http://hub.example:8080/alice/new-project
+```
+
+Both honour the same rule as a push: you need a token whose owner matches the
+repo's owner. Creating is idempotent — running it against an existing repo is a
+no-op (the original visibility is kept; change it later with `wit-hub
+visibility`).
+
 ### Access: tokens
 
 By default a hub runs in **token** mode: `public` repositories can be read and cloned
@@ -320,7 +344,8 @@ wit cat-object blobs b3:…     # write the raw bytes of an object to stdout
 | Command | Purpose |
 |---|---|
 | `wit-hub init` | new hub at `--root` |
-| `wit-hub create <owner>/<name> [--public]` | host a repository |
+| `wit-hub create <owner>/<name> [--public]` | host a repository (locally) |
+| `wit-hub create <hub-url>/<owner>/<name> [--public]` | create a repo on a remote hub (uses `$WIT_TOKEN`) |
 | `wit-hub rm <owner>/<name>` | delete a hosted repository |
 | `wit-hub list` | list hosted repositories |
 | `wit-hub visibility <owner>/<name> public\|private` | change visibility |

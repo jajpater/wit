@@ -43,6 +43,25 @@ class HttpRemote(Remote):
     def _object_url(self, kind: str, oid: str) -> str:
         return f"{self.base_url}/objects/{kind}/{oid}"
 
+    # -- repo lifecycle ---------------------------------------------------
+
+    def create_repo(self, *, visibility: str = "private") -> str:
+        """Ask the hub to create this repo (``PUT /<owner>/<name>``).
+
+        Idempotent: returns ``"created"`` for a fresh repo, ``"exists"`` if it was
+        already there. Needs a token whose owner matches the repo owner (or an
+        ``open`` hub); urllib raises ``HTTPError`` 401/403 otherwise."""
+        url = self.base_url
+        if visibility == "public":
+            url += "?visibility=public"
+        with self._request("PUT", url) as resp:
+            return "created" if resp.status == 201 else "exists"
+
+    def prepare_push(self) -> None:
+        """Auto-create the hosted repo before the first push, the way a dumb
+        remote materializes its storage on first write."""
+        self.create_repo()  # idempotent; raises on auth failure (as the push would)
+
     def _request(self, method: str, url: str, data: bytes | None = None):
         req = urllib.request.Request(url, data=data, method=method)
         if data is not None:
