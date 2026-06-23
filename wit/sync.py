@@ -88,6 +88,7 @@ def push(wit: Path, store: ObjectStore, remote: Remote) -> str:
     local_head = read_head(wit)
     if local_head is None:
         raise ValueError(_("nothing to push (no commits)"))
+    remote.prepare_push()  # hub: auto-create the repo on first push
     # Local retention might have swept older commits; stop the DAG-walk at the boundary
     # (the boundary commit refers to a parent that no longer exists locally).
     boundary = frozenset(read_shallow(wit))

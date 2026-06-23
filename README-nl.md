@@ -214,6 +214,30 @@ cd lib
 wit push                       # onthoudt de hub-URL na de eerste push/clone
 ```
 
+### Een repo op afstand aanmaken
+
+Je hoeft niet meer op de server in te loggen om een repo te maken. Met een token
+voor jouw owner-namespace (zie hieronder) maakt een push naar een URL die nog niet
+bestaat de repo **automatisch aan** — standaard privé, net zoals een dumb remote
+bij de eerste push zijn opslag aanmaakt:
+
+```bash
+export WIT_TOKEN=<jouw-token>
+wit push http://hub.example:8080/alice/nieuw-project   # repo wordt aangemaakt, dan gepusht
+```
+
+Wil je de zichtbaarheid vooraf kiezen, maak 'm dan eerst expliciet aan:
+
+```bash
+wit-hub create http://hub.example:8080/alice/nieuw-project --public
+wit push http://hub.example:8080/alice/nieuw-project
+```
+
+Beide volgen dezelfde regel als een push: je hebt een token nodig waarvan de owner
+overeenkomt met de owner van de repo. Aanmaken is idempotent — het opnieuw
+uitvoeren op een bestaande repo doet niets (de oorspronkelijke zichtbaarheid blijft;
+wijzig die later met `wit-hub visibility`).
+
 ### Toegang: tokens
 
 Standaard draait een hub in **token**-modus: `public`-repository's kan iedereen lezen
@@ -329,7 +353,8 @@ wit cat-object blobs b3:…     # schrijf de ruwe bytes van een object naar stdo
 | Commando | Doel |
 |---|---|
 | `wit-hub init` | nieuwe hub op `--root` |
-| `wit-hub create <owner>/<name> [--public]` | repository hosten |
+| `wit-hub create <owner>/<name> [--public]` | repository hosten (lokaal) |
+| `wit-hub create <hub-url>/<owner>/<name> [--public]` | repo op een hub op afstand aanmaken (gebruikt `$WIT_TOKEN`) |
 | `wit-hub rm <owner>/<name>` | gehoste repository verwijderen |
 | `wit-hub list` | gehoste repository's tonen |
 | `wit-hub visibility <owner>/<name> public\|private` | zichtbaarheid wijzigen |

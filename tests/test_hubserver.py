@@ -166,6 +166,71 @@ def test_push_is_rejected_when_remote_moved(tmp_path, hub_url):
         sync.push(b, bstore, make_remote(hub_url))
 
 
+# -- remote repo creation -------------------------------------------------
+
+
+def test_auto_create_on_first_push(tmp_path, monkeypatch):
+    # an owner token, but no repo created yet on the hub
+    hub = Hub.init(tmp_path / "srv")
+    monkeypatch.setenv("WIT_TOKEN", add_token(tmp_path / "srv", "alice"))
+    server, thread, base = _start(tmp_path / "srv")
+    try:
+        assert hub.resolve("alice", "library") is None  # nothing there yet
+        src = tmp_path / "src"
+        src.mkdir()
+        wit, store, head, _f = _seed(src)
+        # pushing to a non-existent repo creates it (private by default)
+        sync.push(wit, store, make_remote(f"{base}/alice/library"))
+        ref = hub.resolve("alice", "library")
+        assert ref is not None and ref.visibility == "private"
+        cloned = sync.clone(make_remote(f"{base}/alice/library"), tmp_path / "c")
+        assert read_head(cloned) == head
+    finally:
+        server.shutdown()
+        thread.join()
+
+
+def test_explicit_create_endpoint_and_idempotency(tmp_path, monkeypatch):
+    from wit.http_remote import HttpRemote
+
+    hub = Hub.init(tmp_path / "srv")
+    token = add_token(tmp_path / "srv", "alice")
+    server, thread, base = _start(tmp_path / "srv")
+    try:
+        remote = HttpRemote(f"{base}/alice/library", token=token)
+        assert remote.create_repo(visibility="public") == "created"
+        ref = hub.resolve("alice", "library")
+        assert ref is not None and ref.visibility == "public"
+        # creating again is idempotent and keeps the original visibility
+        assert remote.create_repo() == "exists"
+        assert hub.resolve("alice", "library").visibility == "public"
+    finally:
+        server.shutdown()
+        thread.join()
+
+
+def test_create_requires_matching_owner_token(tmp_path, monkeypatch):
+    from wit.http_remote import HttpRemote
+
+    hub = Hub.init(tmp_path / "srv")
+    add_token(tmp_path / "srv", "alice")
+    bob_token = add_token(tmp_path / "srv", "bob")
+    server, thread, base = _start(tmp_path / "srv")
+    try:
+        # no token at all -> 401
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            HttpRemote(f"{base}/alice/library", token=None).create_repo()
+        assert exc.value.code == 401
+        # bob's token may not create in alice's namespace -> 403
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            HttpRemote(f"{base}/alice/library", token=bob_token).create_repo()
+        assert exc.value.code == 403
+        assert hub.resolve("alice", "library") is None  # nothing got created
+    finally:
+        server.shutdown()
+        thread.join()
+
+
 # -- access policy --------------------------------------------------------
 
 import urllib.error

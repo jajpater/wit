@@ -36,6 +36,8 @@ def cmd_init(args: argparse.Namespace) -> int:
 
 
 def cmd_create(args: argparse.Namespace) -> int:
+    if args.slug.startswith(("http://", "https://")):
+        return _create_remote(args)
     owner, name = _split_slug(args.slug)
     visibility = "public" if args.public else "private"
     try:
@@ -44,6 +46,38 @@ def cmd_create(args: argparse.Namespace) -> int:
         print(exc, file=sys.stderr)
         return 1
     print(_("created {slug} ({vis})").format(slug=ref.slug, vis=ref.visibility))
+    return 0
+
+
+def _create_remote(args: argparse.Namespace) -> int:
+    """``wit-hub create http://hub/owner/name`` — create a repo on a remote hub.
+
+    Auth comes from ``$WIT_TOKEN``; the owner must match the token's owner."""
+    import urllib.error
+    import urllib.parse
+
+    from .http_remote import HttpRemote
+
+    visibility = "public" if args.public else "private"
+    remote = HttpRemote(args.slug)
+    slug = urllib.parse.urlparse(remote.base_url).path.strip("/")
+    try:
+        result = remote.create_repo(visibility=visibility)
+    except urllib.error.HTTPError as exc:
+        msg = {
+            400: _("invalid owner/name: {slug}").format(slug=slug),
+            401: _("no token (set WIT_TOKEN)"),
+            403: _("token not allowed for owner: {slug}").format(slug=slug),
+        }.get(exc.code, _("hub error: {code}").format(code=exc.code))
+        print(msg, file=sys.stderr)
+        return 1
+    except urllib.error.URLError as exc:
+        print(_("could not reach hub: {err}").format(err=exc.reason), file=sys.stderr)
+        return 1
+    if result == "exists":
+        print(_("{slug} already exists").format(slug=slug))
+    else:
+        print(_("created {slug} ({vis})").format(slug=slug, vis=visibility))
     return 0
 
 
@@ -137,8 +171,11 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("init", help="initialize an empty hub")
     p.set_defaults(func=cmd_init)
 
-    p = sub.add_parser("create", help="create a hosted repository (owner/name)")
-    p.add_argument("slug")
+    p = sub.add_parser(
+        "create",
+        help="create a hosted repository, locally (owner/name) or on a "
+             "remote hub (http://hub/owner/name, uses $WIT_TOKEN)")
+    p.add_argument("slug", help="owner/name or a hub URL")
     p.add_argument("--public", action="store_true", help="anyone may read/clone")
     p.set_defaults(func=cmd_create)
 

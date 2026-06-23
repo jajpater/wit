@@ -77,6 +77,18 @@ class Hub:
 `create()` does no more than lay out a directory — push creates the object structure on
 its own (as today: "you do not have to initialize a remote").
 
+**Remote creation.** `create()` is reachable over the network too, so you need not be on
+the server to register a repo. The router maps `PUT /<owner>/<name>` (the one transport
+verb with no object/ref path under it) to `create()`, gated by the *same* `can_write`
+check as a push — a token whose owner matches the namespace. It is idempotent (a re-create
+is a no-op that keeps the original visibility), and authorization is decided against a
+*synthetic* `RepoRef`, so a missing repo and a stranger's existing repo return the same
+401/403 — existence is never leaked. On top of that, `HttpRemote.prepare_push()` (a no-op
+on dumb remotes) calls this endpoint before the first upload, so a plain `wit push` to a
+fresh URL auto-creates the repo, mirroring how a filesystem remote materializes its store
+on first write. `wit-hub create <hub-url>/<owner>/<name>` drives the same endpoint
+explicitly when you want to set visibility up front.
+
 ## The router (web layer, building on `web.py`)
 
 `web.py` currently takes one `wit: Path`. The hub generalizes that to a prefix router;
@@ -106,6 +118,8 @@ ObjectTransport                       RefStore
   GET   …/objects/<kind>/<oid>  (download) POST …/refs/<branch>   (compare_and_swap)
   PUT   …/objects/<kind>/<oid>  (upload)        body: {expected, new}
   GET   …/objects/<kind>/       (list)
+
+  lifecycle:  PUT  /<owner>/<name>?visibility=…   (create, idempotent)
 ```
 
 Two new classes go with it, both implementing the **existing** ABCs, so `sync.py`
@@ -184,10 +198,11 @@ truth.
 |------|--------|--------|
 | Repo lifecycle + registry | `hub.py` | done (registry is a live directory scan) |
 | HTTP router + viewer | `hubserver.py`, `web.py` (`base`) | done |
+| Remote repo creation | `hubserver.py` (`PUT /<owner>/<name>`), `http_remote.py` (`create_repo`/`prepare_push`) | done (auto-create on push + explicit `wit-hub create <url>`) |
 | Object transport client | `http_remote.py` | done |
 | Batched transport (M7) | `wire.py` + `objects`/`fetch` routes | done (one request per direction; bounded memory) |
 | Access policy (token / open) | `access.py` | done |
-| `wit-hub` CLI | `hubcli.py` | done (`init`/`create`/`rm`/`list`/`token`/`serve`/`gc`) |
+| `wit-hub` CLI | `hubcli.py` | done (`init`/`create` [local + remote URL]/`rm`/`list`/`visibility`/`token`/`serve`/`gc`) |
 | `registry.sqlite` cache | — | TODO (scan suffices until repo counts grow) |
 | Token scopes / multi-owner / SSH | — | TODO (single owner-per-repo today) |
 
