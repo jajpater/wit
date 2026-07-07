@@ -16,7 +16,7 @@ from .i18n import _
 from .commits import create_commit, read_commit
 from .gc import DEFAULT_GRACE_SECONDS, GcReport, gc
 from .ignore import load_ignore
-from .index import Index, IndexEntry
+from .index import Index, IndexEntry, stat_matches
 from .objects import ObjectStore
 from .refs import head_ref, read_head, update_ref
 from .repo import (
@@ -51,6 +51,7 @@ def add(
     targets: Iterable[str],
     *,
     progress: Callable[[int, str], None] | None = None,
+    force: bool = False,
 ) -> int:
     """Stage the working tree under ``targets``: additions, changes and deletions.
 
@@ -60,19 +61,33 @@ def add(
     `.witignore` patterns are applied; an explicitly named file is always added
     (similar to ``git add -f``).
 
+    For an already-tracked path whose ``(size, mtime, device, inode, mode)`` still
+    matches its index entry, hashing and storing are skipped entirely (git's
+    fast-path assumption: identical stat -> identical content). Pass ``force=True``
+    to bypass that cache and re-hash every walked file regardless of stat.
+
     ``progress``, if given, is called with ``(count, rel)`` after each file is
     stored — for a CLI to report progress on a large directory. The return value
-    counts stored files (deletions are not counted).
+    counts stored files (deletions are not counted; nor are unchanged files
+    skipped via the fast path).
     """
     root = wit.parent
     ignore = load_ignore(root)
     count = 0
     with Index(wit) as index:
+        cached = {e.path: e for e in index.entries()}
         target_rels = []
         for raw in targets:
             target_rels.append(rel_path(Path(raw).resolve(), root))
             for path in walk_files(Path(raw).resolve(), root=root, ignore=ignore):
                 rel = rel_path(path, root)
+                try:
+                    st = path.stat()
+                except FileNotFoundError:
+                    continue  # vanished between the walk and the read; skip it
+                existing = cached.get(rel)
+                if not force and existing is not None and stat_matches(existing, st):
+                    continue  # fast path: stat unchanged since last add, nothing to do
                 try:
                     oid = store.put_file(path, kind="blobs")
                     entry = _entry_for(rel, oid, path.stat())
@@ -188,9 +203,14 @@ def iter_tree(
             yield rel, entry
 
 
-def tree_map(store: ObjectStore, tree_oid: str) -> dict[str, str]:
-    """Flat ``path -> blob-hash`` map of a tree (for status-vs-HEAD)."""
-    return {rel: entry["hash"] for rel, entry in iter_tree(store, tree_oid)}
+def tree_map(store: ObjectStore, tree_oid: str) -> dict[str, tuple[str, int]]:
+    """Flat ``path -> (blob-hash, mode)`` map of a tree (for status-vs-HEAD).
+
+    Mode is included (not just hash) so a staged permission-only change (e.g.
+    ``chmod +x`` followed by `add`) shows as *staged*, not *clean*, even though
+    the content hash alone still matches HEAD.
+    """
+    return {rel: (entry["hash"], entry["mode"]) for rel, entry in iter_tree(store, tree_oid)}
 
 
 def retain(

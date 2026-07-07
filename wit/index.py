@@ -52,6 +52,24 @@ class IndexEntry:
     staged: int = 1
 
 
+def stat_matches(entry: IndexEntry, st) -> bool:
+    """Cheap fast-path check: does a fresh ``os.stat()`` still match this entry?
+
+    ``size``/``mtime_ns``/``device``/``inode`` are git's fast-path signal that
+    content is unchanged; ``mode`` is compared too so a permission-only change
+    (``chmod +x``) is never missed just because the content hash still matches.
+    A match is a strong (not absolute -- see "racy git") signal that nothing
+    changed; a mismatch just means: fall back to hashing to be sure.
+    """
+    return (
+        entry.size == st.st_size
+        and entry.mtime_ns == st.st_mtime_ns
+        and entry.device == st.st_dev
+        and entry.inode == st.st_ino
+        and entry.mode == st.st_mode
+    )
+
+
 class Index:
     def __init__(self, wit_dir: Path) -> None:
         self.path = Path(wit_dir) / "index.sqlite"

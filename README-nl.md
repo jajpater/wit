@@ -360,6 +360,7 @@ wit cat-object blobs b3:…     # schrijf de ruwe bytes van een object naar stdo
 | `wit checkout [commit]` | bestanden terugzetten |
 | `wit sparse set/list` | gedeeltelijke checkout |
 | `wit clone <remote> <map>` | repository ophalen |
+| `wit remote [set <remote>]` | standaardremote tonen/instellen |
 | `wit push [remote]` | wijzigingen versturen |
 | `wit pull [remote]` | wijzigingen ophalen |
 | `wit serve` | webinterface starten |
