@@ -59,7 +59,23 @@ wit add articles/             # an entire directory
 wit add .                     # everything in the current directory
 ```
 
+Under the given path `add` also stages **deletions**: a tracked file that has
+disappeared from disk is untracked (like `git add .` since git 2.0). So if you
+move a directory with `mv articles old` and then run `wit add .`, the move is
+handled automatically — no need to `wit rm` the old paths by hand.
+
 What you do not want to include, you put in a `.witignore` (see below).
+
+### `wit mv <src>… <dst>`
+Moves or renames files/directories on disk *and* updates the index in one step
+(like `git mv`). Since the content is unchanged, the existing blob is reused (no
+new storage).
+
+```bash
+wit mv book.txt novel.txt     # rename
+wit mv articles/ old/         # rename a directory
+wit mv a.txt b.txt dir/       # several files into an existing directory
+```
 
 ### `wit status`
 Shows what has changed compared to what you have committed: new (untracked), modified,
@@ -325,7 +341,8 @@ wit cat-object blobs b3:…     # write the raw bytes of an object to stdout
 | Command | Purpose |
 |---|---|
 | `wit init` | new repository |
-| `wit add <path>` | put under management |
+| `wit add <path>` | put under management (also stages deletions) |
+| `wit mv <src>… <dst>` | move/rename |
 | `wit rm [--cached] <path>` | remove from management |
 | `wit status` | what has changed |
 | `wit commit -m "…"` | record state |

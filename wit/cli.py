@@ -92,6 +92,17 @@ def cmd_rm(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_mv(args: argparse.Namespace) -> int:
+    wit = find_wit()
+    try:
+        moved = porcelain.mv(wit, ObjectStore(wit), args.src, args.dst)
+    except (ValueError, OSError) as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    print(_("{count} path(s) moved").format(count=moved))
+    return 0
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     wit = find_wit()
     store = ObjectStore(wit)
@@ -269,7 +280,8 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("fsck", help="verify the object store")
     p.set_defaults(func=cmd_fsck)
 
-    p = sub.add_parser("add", help="start tracking files")
+    p = sub.add_parser(
+        "add", help="stage files: additions, changes and deletions under a path")
     p.add_argument("paths", nargs="+")
     p.set_defaults(func=cmd_add)
 
@@ -279,6 +291,11 @@ def main(argv: list[str] | None = None) -> int:
         "--cached", action="store_true", help="untrack only, keep file on disk"
     )
     p.set_defaults(func=cmd_rm)
+
+    p = sub.add_parser("mv", help="move/rename tracked files and update the index")
+    p.add_argument("src", nargs="+", help="source file(s) or directory")
+    p.add_argument("dst", help="destination path or directory")
+    p.set_defaults(func=cmd_mv)
 
     p = sub.add_parser("status", help="show working tree status compared to index")
     p.set_defaults(func=cmd_status)

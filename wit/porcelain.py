@@ -8,6 +8,7 @@ functions directly (independent of cwd/argparse).
 from __future__ import annotations
 
 import os
+import shutil
 from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 
@@ -37,6 +38,13 @@ def _entry_for(rel: str, oid: str, st: os.stat_result) -> IndexEntry:
     )
 
 
+def _within(entry_path: str, target_rel: str) -> bool:
+    """Is ``entry_path`` covered by the pathspec ``target_rel`` (a file or dir)?"""
+    if target_rel == ".":
+        return True
+    return entry_path == target_rel or entry_path.startswith(target_rel + "/")
+
+
 def add(
     wit: Path,
     store: ObjectStore,
@@ -44,19 +52,25 @@ def add(
     *,
     progress: Callable[[int, str], None] | None = None,
 ) -> int:
-    """Start tracking files: save blob + write index entry.
+    """Stage the working tree under ``targets``: additions, changes and deletions.
 
-    When walking a directory, `.witignore` patterns are applied; an explicitly
-    named file is always added (similar to ``git add -f``).
+    Present files are stored (blob + index entry); tracked files that have
+    disappeared from disk under a named pathspec are unstaged (removed from the
+    index), matching ``git add .`` since git 2.0. When walking a directory,
+    `.witignore` patterns are applied; an explicitly named file is always added
+    (similar to ``git add -f``).
 
     ``progress``, if given, is called with ``(count, rel)`` after each file is
-    stored — for a CLI to report progress on a large directory.
+    stored — for a CLI to report progress on a large directory. The return value
+    counts stored files (deletions are not counted).
     """
     root = wit.parent
     ignore = load_ignore(root)
     count = 0
     with Index(wit) as index:
+        target_rels = []
         for raw in targets:
+            target_rels.append(rel_path(Path(raw).resolve(), root))
             for path in walk_files(Path(raw).resolve(), root=root, ignore=ignore):
                 rel = rel_path(path, root)
                 try:
@@ -68,7 +82,60 @@ def add(
                 count += 1
                 if progress is not None:
                     progress(count, rel)
+        # Stage deletions: a tracked path under a named pathspec whose file is
+        # gone is dropped from the index (ignore rules don't apply to removals).
+        for entry in index.entries():
+            if (root / entry.path).exists():
+                continue
+            if any(_within(entry.path, t) for t in target_rels):
+                index.remove(entry.path)
     return count
+
+
+def mv(wit: Path, store: ObjectStore, srcs: list[str], dst: str) -> int:
+    """Move/rename tracked paths: relocate on disk and re-point the index.
+
+    Mirrors ``git mv``: with an existing-directory destination each source is
+    moved into it; otherwise a single source is renamed to the destination.
+    Tracked entries under a source are re-pointed to their new path (the blob is
+    unchanged, only the path key moves); untracked files travel along on disk but
+    stay untracked. Returns the number of tracked paths relocated.
+    """
+    root = wit.parent
+    dst_path = Path(dst)
+    into_dir = dst_path.is_dir()
+    if len(srcs) > 1 and not into_dir:
+        raise ValueError(_("target {dst} is not a directory").format(dst=dst))
+    moved = 0
+    with Index(wit) as index:
+        for raw in srcs:
+            src_path = Path(raw)
+            if not src_path.exists():
+                raise ValueError(
+                    _("{src}: no such file or directory").format(src=raw))
+            final = dst_path / src_path.name if into_dir else dst_path
+            if final.resolve() == src_path.resolve():
+                raise ValueError(
+                    _("{src} and destination are the same").format(src=raw))
+            if final.exists():
+                raise ValueError(
+                    _("{dst} already exists").format(dst=final.as_posix()))
+            src_rel = rel_path(src_path, root)
+            final_rel = rel_path(final, root)
+            # Snapshot the tracked subtree *before* the move changes the disk.
+            subtree = [
+                e for e in index.entries()
+                if e.path == src_rel or e.path.startswith(src_rel + "/")
+            ]
+            final.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(src_path), str(final))
+            for e in subtree:
+                suffix = e.path[len(src_rel):]  # "" for a file, "/child" for a dir
+                new_rel = final_rel + suffix
+                index.remove(e.path)
+                index.put_entry(_entry_for(new_rel, e.hash, (root / new_rel).stat()))
+                moved += 1
+    return moved
 
 
 def rm(

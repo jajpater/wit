@@ -61,7 +61,24 @@ wit add artikelen/            # een hele map
 wit add .                     # alles in de huidige map
 ```
 
+`add` staget onder het opgegeven pad ook **verwijderingen**: een getrackt
+bestand dat van schijf verdwenen is, wordt uit beheer gehaald (net als
+`git add .` sinds git 2.0). Verplaats je dus een map met `mv artikelen oud` en
+draai je daarna `wit add .`, dan wordt de verplaatsing vanzelf verwerkt — je
+hoeft de oude paden niet handmatig te `wit rm`-en.
+
 Wat je niet wilt meenemen, zet je in een `.witignore` (zie verderop).
+
+### `wit mv <bron>… <doel>`
+Verplaatst of hernoemt bestanden/mappen op schijf én werkt de index in één keer
+bij (zoals `git mv`). Omdat de inhoud niet verandert, wordt de bestaande blob
+hergebruikt (geen nieuwe opslag).
+
+```bash
+wit mv boek.txt roman.txt     # hernoemen
+wit mv artikelen/ oud/        # map hernoemen
+wit mv a.txt b.txt map/       # meerdere bestanden in een bestaande map
+```
 
 ### `wit status`
 Toont wat er veranderd is t.o.v. wat je hebt vastgelegd: nieuw (untracked), gewijzigd,
@@ -334,7 +351,8 @@ wit cat-object blobs b3:…     # schrijf de ruwe bytes van een object naar stdo
 | Commando | Doel |
 |---|---|
 | `wit init` | nieuwe repository |
-| `wit add <pad>` | onder beheer nemen |
+| `wit add <pad>` | onder beheer nemen (staget ook verwijderingen) |
+| `wit mv <bron>… <doel>` | verplaatsen/hernoemen |
 | `wit rm [--cached] <pad>` | uit beheer halen |
 | `wit status` | wat is er veranderd |
 | `wit commit -m "…"` | toestand vastleggen |
