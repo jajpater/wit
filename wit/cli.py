@@ -172,7 +172,12 @@ def cmd_push(args: argparse.Namespace) -> int:
         print(_("no remote specified or configured"), file=sys.stderr)
         return 1
     try:
-        head = sync.push(wit, ObjectStore(wit), make_remote(_normalize_spec(spec)))
+        head = sync.push(
+            wit,
+            ObjectStore(wit),
+            make_remote(_normalize_spec(spec)),
+            progress=sys.stderr.isatty(),
+        )
     except ValueError as exc:
         print(exc, file=sys.stderr)
         return 1

@@ -84,7 +84,9 @@ def _reachable_objects(
             stack.extend(p for p in commit["parents"] if store.has("commits", p))
 
 
-def push(wit: Path, store: ObjectStore, remote: Remote) -> str:
+def push(
+    wit: Path, store: ObjectStore, remote: Remote, *, progress: bool = False
+) -> str:
     local_head = read_head(wit)
     if local_head is None:
         raise ValueError(_("nothing to push (no commits)"))
@@ -101,7 +103,7 @@ def push(wit: Path, store: ObjectStore, remote: Remote) -> str:
 
     have = _ancestors(store, remote_head, boundary)
     items = list(_reachable_objects(store, local_head, have, boundary))
-    remote.upload_objects(store, items)  # M7: bulk i.p.v. per object
+    remote.upload_objects(store, items, progress=progress)  # M7: bulk i.p.v. per object
 
     # ref-CAS as the last step — the true transaction
     if not remote.compare_and_swap_ref(MAIN_REF, remote_head, local_head):

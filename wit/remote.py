@@ -47,8 +47,14 @@ class ObjectTransport(ABC):
     # filesystem). rclone overrides this with a single call for everything, so the
     # per-object latency of cloud backends doesn't become the bottleneck. --
     def upload_objects(
-        self, store: ObjectStore, items: Iterable[tuple[str, str]]
+        self,
+        store: ObjectStore,
+        items: Iterable[tuple[str, str]],
+        *,
+        progress: bool = False,
     ) -> None:
+        # ``progress`` is a hint for transports that can render live progress
+        # (rclone). The default per-object loop has none, so it is ignored here.
         for kind, oid in items:
             if not self.has(kind, oid):
                 self.upload(store, kind, oid)

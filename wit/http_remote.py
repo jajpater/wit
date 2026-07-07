@@ -109,8 +109,14 @@ class HttpRemote(Remote):
                 f"expected {oid}, got {stored}")
 
     def upload_objects(
-        self, store: ObjectStore, items: Iterable[tuple[str, str]]
+        self,
+        store: ObjectStore,
+        items: Iterable[tuple[str, str]],
+        *,
+        progress: bool = False,
     ) -> None:
+        # ``progress`` (rclone's native display) does not apply to the streamed
+        # HTTP upload; accepted for interface parity and ignored.
         items = list(items)
         if not items:
             return

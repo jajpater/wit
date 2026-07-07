@@ -18,6 +18,7 @@ from collections import defaultdict
 from collections.abc import Iterable
 from pathlib import Path
 
+from .i18n import _
 from .objects import ObjectStore
 from .remote import META_KINDS, Remote
 
@@ -42,7 +43,13 @@ class DumbRcloneRemote(Remote):
         h = oid.split(":", 1)[1]
         return self._path("objects", kind, h[:2], h[2:]), h
 
-    def _run(self, args: list[str], **kw) -> subprocess.CompletedProcess:
+    def _run(
+        self, args: list[str], *, stream: bool = False, **kw
+    ) -> subprocess.CompletedProcess:
+        # ``stream``: let rclone draw straight to the terminal (for --progress)
+        # instead of capturing its output.
+        if stream:
+            return subprocess.run([self.rclone, *args], **kw)
         return subprocess.run([self.rclone, *args], capture_output=True, **kw)
 
     # -- ObjectTransport --
@@ -90,7 +97,9 @@ class DumbRcloneRemote(Remote):
         return out
 
     # -- Bulk-transport (M7): one rclone call per object kind instead of per object --
-    def _bulk_copy(self, src: str, dst: str, rels: list[str]) -> None:
+    def _bulk_copy(
+        self, src: str, dst: str, rels: list[str], *, progress: bool = False
+    ) -> None:
         if not rels:
             return
         fd, listfile = tempfile.mkstemp()
@@ -99,9 +108,21 @@ class DumbRcloneRemote(Remote):
                 f.write("\n".join(rels) + "\n")
             # rclone copy is idempotent: existing objects are skipped,
             # so no per-object has() round-trips are needed.
-            result = self._run(["copy", "--files-from", listfile, src, dst])
-            if result.returncode != 0:
-                raise RcloneError(result.stderr.decode())
+            args = ["copy", "--files-from", listfile, src, dst]
+            if progress:
+                # Let rclone render its own live progress (bytes/speed/ETA) on
+                # the terminal; its output is inherited instead of captured, so
+                # on failure we only have the exit code (rclone already showed
+                # the error itself).
+                args.insert(1, "--progress")
+                result = self._run(args, stream=True)
+                if result.returncode != 0:
+                    raise RcloneError(_("rclone copy failed (exit {code})").format(
+                        code=result.returncode))
+            else:
+                result = self._run(args)
+                if result.returncode != 0:
+                    raise RcloneError(result.stderr.decode())
         finally:
             os.unlink(listfile)
 
@@ -113,11 +134,18 @@ class DumbRcloneRemote(Remote):
         return by_kind
 
     def upload_objects(
-        self, store: ObjectStore, items: Iterable[tuple[str, str]]
+        self,
+        store: ObjectStore,
+        items: Iterable[tuple[str, str]],
+        *,
+        progress: bool = False,
     ) -> None:
         for kind, rels in self._group(items).items():
             self._bulk_copy(
-                str(store.objects_dir / kind), self._path("objects", kind), rels
+                str(store.objects_dir / kind),
+                self._path("objects", kind),
+                rels,
+                progress=progress,
             )
 
     def download_objects(
