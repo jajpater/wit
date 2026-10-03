@@ -354,6 +354,7 @@ wit cat-object blobs b3:…     # write the raw bytes of an object to stdout
 | `wit checkout [commit]` | restore files |
 | `wit sparse set/list` | partial checkout |
 | `wit clone <remote> <dir>` | fetch repository |
+| `wit remote [set <remote>]` | show/set the default remote |
 | `wit push [remote]` | send changes |
 | `wit pull [remote]` | fetch changes |
 | `wit serve` | start web interface |

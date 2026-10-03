@@ -1,10 +1,13 @@
 """`status`: compare the working directory with the index (and with HEAD).
 
-Change detection follows git's fast path: if ``(size, mtime, device, inode)`` matches the
-index entry, we assume the content is unchanged; otherwise we re-hash to distinguish a real
-change from a mere touch. If a HEAD tree is provided, an
-unchanged, tracked file is considered *clean* if its hash matches HEAD,
+Change detection follows git's fast path: if ``(size, mtime, device, inode, mode)`` matches
+the index entry, we assume the content and permissions are unchanged; otherwise we re-hash
+(and re-check mode) to distinguish a real change from a mere touch. If a HEAD tree is
+provided, an unchanged, tracked file is considered *clean* if its (hash, mode) matches HEAD,
 and otherwise *staged*; without HEAD (no commits yet), everything in the index is 'staged'.
+
+Pass ``full=True`` to bypass the stat fast path and re-hash every tracked file — an escape
+hatch for when the stat cache itself is under suspicion (e.g. after clock skew).
 """
 
 from __future__ import annotations
@@ -13,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .ignore import load_ignore
-from .index import Index, IndexEntry
+from .index import Index, IndexEntry, stat_matches
 from .objects import hash_file
 from .worktree import rel_path, walk_files
 
@@ -40,17 +43,21 @@ class Status:
         return bool(self.staged or self.staged_deleted)
 
 
-def _stat_matches(entry: IndexEntry, st) -> bool:
-    return (
-        entry.size == st.st_size
-        and entry.mtime_ns == st.st_mtime_ns
-        and entry.device == st.st_dev
-        and entry.inode == st.st_ino
-    )
+def _is_modified(entry: IndexEntry, path: Path, *, full: bool = False) -> bool:
+    st = path.stat()
+    if not full and stat_matches(entry, st):
+        return False  # fast path: stat (incl. mode) unchanged -> definitely unchanged
+    # Slow path: a mode change (e.g. chmod +x) counts as modified even when the
+    # content hash still matches HEAD; otherwise fall back to a real content hash.
+    return entry.mode != st.st_mode or hash_file(path) != entry.hash
 
 
 def compute_status(
-    index: Index, root: Path, head_tree: dict[str, str] | None = None
+    index: Index,
+    root: Path,
+    head_tree: dict[str, tuple[str, int]] | None = None,
+    *,
+    full: bool = False,
 ) -> Status:
     root = Path(root)
     entries = {e.path: e for e in index.entries()}
@@ -67,10 +74,9 @@ def compute_status(
             if not ignore.match(rel, False):
                 status.untracked.append(rel)
             continue
-        unchanged = _stat_matches(entry, path.stat()) or hash_file(path) == entry.hash
-        if not unchanged:
+        if _is_modified(entry, path, full=full):
             status.modified.append(rel)
-        elif head_tree is not None and head_tree.get(rel) == entry.hash:
+        elif head_tree is not None and head_tree.get(rel) == (entry.hash, entry.mode):
             pass  # tracked, unchanged and equal to HEAD -> clean
         else:
             status.staged.append(rel)

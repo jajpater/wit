@@ -78,7 +78,7 @@ def cmd_add(args: argparse.Namespace) -> int:
             print(f"\r  {count} files…", end="", file=sys.stderr, flush=True)
 
     added = porcelain.add(
-        wit, ObjectStore(wit), args.paths, progress=progress)
+        wit, ObjectStore(wit), args.paths, progress=progress, force=args.force)
     if tty:
         print("\r\033[K", end="", file=sys.stderr)  # clear the progress line
     print(_("{count} file(s) added").format(count=added))
@@ -112,7 +112,7 @@ def cmd_status(args: argparse.Namespace) -> int:
         if head else None
     )
     with Index(wit) as index:
-        status = compute_status(index, wit.parent, head_tree)
+        status = compute_status(index, wit.parent, head_tree, full=args.force)
     groups = (
         (_("Conflicts (both versions kept — choose, edit, add)"), status.conflicts),
         (_("Staged (added)"), status.staged),
@@ -173,6 +173,22 @@ def cmd_clone(args: argparse.Namespace) -> int:
     wit = sync.clone(make_remote(spec), Path(args.dest))
     set_remote(wit, spec)
     print(_("cloned to {dest}").format(dest=wit.parent))
+    return 0
+
+
+def cmd_remote(args: argparse.Namespace) -> int:
+    wit = find_wit()
+    if args.remote_action == "set":
+        spec = _normalize_spec(args.path)
+        set_remote(wit, spec)
+        print(_("remote set to {spec}").format(spec=spec))
+        return 0
+    # no sub-action (or "show"): print the configured remote, if any
+    remote = read_config(wit).get("remote")
+    if remote:
+        print(remote)
+    else:
+        print(_("no remote configured"))
     return 0
 
 
@@ -283,6 +299,11 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser(
         "add", help="stage files: additions, changes and deletions under a path")
     p.add_argument("paths", nargs="+")
+    p.add_argument(
+        "--force", action="store_true",
+        help="bypass the stat cache and re-hash every walked file, even if its "
+             "stat looks unchanged (e.g. after suspected clock skew)",
+    )
     p.set_defaults(func=cmd_add)
 
     p = sub.add_parser("rm", help="stop tracking files")
@@ -298,6 +319,11 @@ def main(argv: list[str] | None = None) -> int:
     p.set_defaults(func=cmd_mv)
 
     p = sub.add_parser("status", help="show working tree status compared to index")
+    p.add_argument(
+        "--force", action="store_true",
+        help="bypass the stat cache and re-hash every tracked file, even if its "
+             "stat looks unchanged (e.g. after suspected clock skew)",
+    )
     p.set_defaults(func=cmd_status)
 
     p = sub.add_parser("commit", help="record staged state as a commit")
@@ -336,6 +362,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("remote")
     p.add_argument("dest")
     p.set_defaults(func=cmd_clone)
+
+    p = sub.add_parser("remote", help="show or set the configured remote path")
+    rsub = p.add_subparsers(dest="remote_action")
+    pa = rsub.add_parser("set", help="set the remote path used by default for push/pull")
+    pa.add_argument("path")
+    rsub.add_parser("show", help="print the configured remote path")
+    p.set_defaults(func=cmd_remote)
 
     p = sub.add_parser("push", help="upload commits to the remote")
     p.add_argument("remote", nargs="?", help="remote path (default: configured remote)")
