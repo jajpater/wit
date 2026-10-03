@@ -170,6 +170,10 @@ You don't! You don't have to initialize a remote beforehand. As soon as you push
 
 `push` is crash-safe: all objects are uploaded first, and only as the last step does the branch pointer jump. An aborted push leaves at most some unused objects behind, never a broken repository.
 
+`wit push` shows progress by default, including when stderr is redirected: percentage, bytes and speed
+for HTTP, an object counter for filesystem remotes, and rclone's own transfer
+display for rclone remotes. Use `--no-progress` to turn it off.
+
 ### If push is rejected
 
 If someone else has pushed in the meantime, `wit push` refuses (non-fast-forward). First do `wit pull`: concurrent changes are merged. If both sides modify the **same** file, your own version stays on the original name and the other one appears next to it as `file.conflict-<machine>-<commit>.ext`. `wit status` then shows a **Conflicts** group; you pick the correct version, delete the other, and do `add` + `commit` to resolve it.

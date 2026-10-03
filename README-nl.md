@@ -175,6 +175,10 @@ Niet! Je hoeft een remote niet vooraf te initialiseren. Zodra je voor het eerst 
 verspringt de branch-pointer. Een afgebroken push laat hooguit wat ongebruikte objecten
 achter, nooit een kapotte repository.
 
+`wit push` toont standaard voortgang, ook bij omgeleide stderr: percentage, bytes en snelheid
+voor HTTP, een objectteller voor lokale remotes en de eigen voortgangsweergave van
+rclone voor rclone-remotes. Gebruik `--no-progress` om het uit te schakelen.
+
 ### Als push wordt geweigerd
 
 Heeft iemand anders intussen gepusht, dan weigert `wit push` (non-fast-forward). Doe eerst

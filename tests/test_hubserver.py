@@ -85,13 +85,23 @@ def test_repo_list_and_view_after_push(tmp_path, hub_url):
     assert "hallo" in view
 
 
-def test_push_then_clone_is_byte_identical(tmp_path, hub_url):
+@pytest.mark.parametrize("progress", [False, True])
+def test_push_then_clone_is_byte_identical(tmp_path, hub_url, capsys, progress):
     src = tmp_path / "src"
     src.mkdir()
     wit, store, head, files = _seed(src)
 
-    pushed = sync.push(wit, store, make_remote(hub_url))
+    pushed = sync.push(wit, store, make_remote(hub_url), progress=progress)
     assert pushed == head
+    output = capsys.readouterr()
+    assert output.out == ""
+    if progress:
+        assert "0%" in output.err
+        assert "100%" in output.err
+        assert "MiB" in output.err and "/s" in output.err
+        assert output.err.endswith("\n")
+    else:
+        assert output.err == ""
 
     dest = tmp_path / "clone"
     cloned = sync.clone(make_remote(hub_url), dest)

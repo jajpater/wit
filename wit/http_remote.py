@@ -11,9 +11,8 @@ abstractions (see ARCHITECTURE-hub.md):
       PUT   …/objects/<kind>/<oid>
       GET   …/objects/<kind>/
 
-Only the stdlib (``urllib``) is used — no new runtime dependency. The bulk
-``upload_objects`` / ``download_objects`` paths still fall back to the per-object
-loop from ``ObjectTransport``; a batched request is a later optimization (M7).
+Only the stdlib (``urllib``) is used — no new runtime dependency. Bulk uploads
+and downloads stream framed objects in one request per direction.
 """
 
 from __future__ import annotations
@@ -25,6 +24,7 @@ import urllib.request
 from collections.abc import Iterable
 
 from .objects import ObjectStore
+from .progress import TransferProgress
 from .remote import META_KINDS, Remote
 from .wire import frame_header, frame_size, read_frames
 
@@ -115,8 +115,6 @@ class HttpRemote(Remote):
         *,
         progress: bool = False,
     ) -> None:
-        # ``progress`` (rclone's native display) does not apply to the streamed
-        # HTTP upload; accepted for interface parity and ignored.
         items = list(items)
         if not items:
             return
@@ -125,10 +123,14 @@ class HttpRemote(Remote):
 
         def body():
             for (kind, oid), sz in zip(items, sizes):
-                yield frame_header(kind, oid, sz)
+                header = frame_header(kind, oid, sz)
+                yield header
+                display.advance(len(header))
                 with open(store.path_for(kind, oid), "rb") as f:
                     while chunk := f.read(1024 * 1024):
                         yield chunk
+                        # urllib resumes the iterator after sending the chunk.
+                        display.advance(len(chunk))
 
         req = urllib.request.Request(
             f"{self.base_url}/objects", data=body(), method="POST")
@@ -136,8 +138,9 @@ class HttpRemote(Remote):
         req.add_header("Content-Length", str(total))
         if self.token:
             req.add_header("Authorization", f"Bearer {self.token}")
-        with urllib.request.urlopen(req):
-            pass
+        with TransferProgress(total, enabled=progress) as display:
+            with urllib.request.urlopen(req):
+                pass
 
     def download_objects(
         self, store: ObjectStore, items: Iterable[tuple[str, str]]

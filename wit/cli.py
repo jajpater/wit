@@ -187,7 +187,7 @@ def cmd_push(args: argparse.Namespace) -> int:
             wit,
             ObjectStore(wit),
             make_remote(_normalize_spec(spec)),
-            progress=sys.stderr.isatty(),
+            progress=args.progress,
         )
     except ValueError as exc:
         print(exc, file=sys.stderr)
@@ -339,6 +339,10 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("push", help="upload commits to the remote")
     p.add_argument("remote", nargs="?", help="remote path (default: configured remote)")
+    p.add_argument(
+        "--progress", action=argparse.BooleanOptionalAction, default=True,
+        help="show transfer progress (default: enabled)",
+    )
     p.set_defaults(func=cmd_push)
 
     p = sub.add_parser("pull", help="fetch commits from the remote (fast-forward)")

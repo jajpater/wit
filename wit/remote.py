@@ -20,6 +20,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from .objects import ObjectStore
+from .progress import TransferProgress
 
 MAIN_REF = "refs/heads/main"
 
@@ -53,11 +54,15 @@ class ObjectTransport(ABC):
         *,
         progress: bool = False,
     ) -> None:
-        # ``progress`` is a hint for transports that can render live progress
-        # (rclone). The default per-object loop has none, so it is ignored here.
-        for kind, oid in items:
-            if not self.has(kind, oid):
-                self.upload(store, kind, oid)
+        total = 0
+        if progress:
+            items = list(items)
+            total = len(items)
+        with TransferProgress(total, enabled=progress, byte_count=False) as display:
+            for kind, oid in items:
+                if not self.has(kind, oid):
+                    self.upload(store, kind, oid)
+                display.advance(1)
 
     def download_objects(
         self, store: ObjectStore, items: Iterable[tuple[str, str]]
